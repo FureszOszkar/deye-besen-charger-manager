@@ -1,0 +1,31 @@
+{
+    "inverter_ip": "192.168.0.100",
+    "inverter_port": 8899,
+    "logger_serial": 1234567890,
+    "http_port": 8080,
+    "start_soc": 100,
+    "stop_import_limit": 2000,
+    "grid_charge_duration_minutes": 30,
+    "house_power_limit_w": 3000,
+    "control_mode": "monitoring",
+    "persist_mode_on_restart": true,
+    "charger_name": "ACP#DefaultName",
+    "charger_mac": "00:11:22:33:44:55",
+    "charger_password": "YOURPIN",
+    "charger_max_amps": 16,
+    "force_submode": "manual_stop",
+    "schedule_solar_auto": false,
+    "auto_enabled": false,
+    "schedule_enabled": false,
+    "forced_schedule": [
+        {"day": "Hétfő", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": true},
+        {"day": "Kedd", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": true},
+        {"day": "Szerda", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": true},
+        {"day": "Csütörtök", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": true},
+        {"day": "Péntek", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": true},
+        {"day": "Szombat", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": true},
+        {"day": "Vasárnap", "enabled": false, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": true}
+    ],
+    "web_auth_enabled": true,
+    "web_password": "YOUR_WEB_PASSWORD"
+}
