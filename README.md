@@ -55,7 +55,7 @@ A vezérlőszoftver szorosan együttműködik a Deye inverteren beállított bel
 
 ## 4. Felhasználói Felület és Műszerfal Útmutató
 
-A webes felület a `http://localhost:8080` (vagy `http://127.0.0.1:8080`) címen érhető el a futtató gépről. A felület prémium, áttetsző sötétszürke glassmorphic dizájnt kapott, amely mögött a gyökérkönyvtárba helyezett `background.png` háttérkép stílusosan átsejlik.
+A webes felület a `http://localhost:8080` (vagy `http://127.0.0.1:8080`) címen érhető el a futtató gépről. A helyi hálózat egyéb eszközeiről (pl. mobiltelefonról, táblagépről) a futtató számítógép helyi hálózati IP-címével és a port megadásával érhető el (pl. `http://192.168.0.8:8080`). A felület prémium, áttetsző sötétszürke glassmorphic dizájnt kapott, amely mögött a gyökérkönyvtárba helyezett `background.png` háttérkép stílusosan átsejlik.
 
 ### A) Színkódolt Mérések (Áramirány Jelzése)
 A kezelőfelület jobb oldalán lévő **Mérések & Visszacsatolás** kártyán a legfontosabb teljesítményadatok színkódolása a következő:
@@ -66,6 +66,14 @@ A kezelőfelület jobb oldalán lévő **Mérések & Visszacsatolás** kártyán
     *   **ZÖLD (Pozitív érték):** Az akkumulátor éppen **töltődik** a napelemről.
     *   **PIROS (Negatív érték):** Az akkumulátor éppen **merül** (energiát ad le a háznak).
 *   **PV, Ház UPS, és a Nem UPS ágon lévő fogyasztók teljesítménye:** Fehér színnel jelenik meg a tiszta olvashatóság érdekében.
+
+### B) Mobilbarát és Reszponzív Megjelenés
+A kezelőfelület teljes körű mobil-optimalizálást kapott (`1024px` képernyőszélesség alatt lép életbe):
+*   **Hamburger Menü és Overlay:** Mobil eszközökön a klasszikus tabválasztók helyett egy jobb felső sarokban elhelyezett hamburger gomb (☰) és egy elegáns, elmosódott hátterű (glassmorphic) teljes képernyős menü segíti a navigációt.
+*   **Egykártyás (Single-Card) elrendezés:** A végtelen görgetés elkerülése érdekében mobilon egyszerre mindig csak egy kiválasztott vezérlőpanel vagy mérési blokk látható.
+*   **Tapadós (Sticky) Mobil Státusz Sáv:** A képernyő tetején rögzített státusz sáv valós idejű LED-szerű visszajelzőkkel mutatja a kapcsolatok (Deye, BESEN) és az aktív üzemmódok (Auto, Ütemezett) állapotát.
+*   **Mobil-optimalizált Naptár és Űrlapok:** Az ütemezési sorok 3 szintes blokkokká alakulnak (külön sorba kerül a csúszka és a felülbírálási opció), így ujjheggyel is könnyen kezelhetővé válnak. Minden egyéb beviteli mező 1 oszlopos elrendezésbe rendeződik át.
+*   **Cache-Control védelem:** A HTTP szerver automatikus no-cache fejlécekkel küldi el a lapot, így a mobil böngészők nem tudják a régi elrendezéseket gyorsítótárazni (cache-elni).
 
 ---
 
@@ -139,7 +147,7 @@ python deye_besen_controller.py
 ### D) Önálló `.exe` fájl fordítása
 A Windows-os ékezetes mappák miatti fordítási hibák elkerülésére a fordítás átmeneti ékezetmentes könyvtárakon keresztül javasolt:
 ```powershell
-py -m PyInstaller --onefile --clean --distpath "C:\Users\Ignis\.gemini\antigravity\dist_temp" --workpath "C:\Users\Ignis\.gemini\antigravity\build_temp" deye_besen_controller.py
+py -m PyInstaller --onefile --clean --distpath "C:\Users\<Felhasználó>\dist_temp" --workpath "C:\Users\<Felhasználó>\build_temp" deye_besen_controller.py
 ```
 A sikeres fordítás után a generált `deye_besen_controller.exe` fájl visszamásolható a projekt fő könyvtárába.
 

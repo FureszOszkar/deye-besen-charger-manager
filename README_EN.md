@@ -55,7 +55,7 @@ The controller software works in close harmony with the Deye inverter's internal
 
 ## 4. User Interface and Dashboard Guide
 
-The web interface is accessible at `http://localhost:8080` (or `http://127.0.0.1:8080`) from the host computer. It features a premium, translucent dark-grey glassmorphic design that lets the `background.png` image shine through the cards.
+The web interface is accessible at `http://localhost:8080` (or `http://127.0.0.1:8080`) from the host computer. To access the dashboard from other devices on the same local network (such as a mobile phone or tablet), use the host computer's local IP address and port (e.g., `http://192.168.0.8:8080`). It features a premium, translucent dark-grey glassmorphic design that lets the `background.png` image shine through the cards.
 
 ### A) Color-Coded Telemetry (Current Flow Direction)
 On the **Mérések & Visszacsatolás (Measurements & Feedback)** card on the right, the most important power readings are color-coded:
@@ -66,6 +66,14 @@ On the **Mérések & Visszacsatolás (Measurements & Feedback)** card on the rig
     *   **GREEN (Positive value):** The battery is currently **charging** from solar power.
     *   **RED (Negative value):** The battery is currently **discharging** (supplying energy to the house).
 *   **PV, House UPS load, and Non-UPS consumers load** are displayed in white for clean readability.
+
+### B) Mobile and Responsive View
+The interface is fully optimized for mobile screens (activated below `1024px` width):
+*   **Hamburger Menu & Glassmorphic Overlay:** On mobile, the traditional desktop tab buttons are hidden. Instead, a clean hamburger icon (☰) in the header opens a beautiful, glassmorphic full-screen navigation overlay.
+*   **Single-Card Section Layout:** To eliminate endless scrolling, only one active configuration card or telemetry panel is visible at a time.
+*   **Sticky Status Bar:** A thin header bar sticks to the top of the mobile screen. It provides real-time LED-like indicator dots showing the connection status (Deye, BESEN) and the active modes (Solar Auto, Scheduled).
+*   **Touch-Friendly Scheduled Calendar:** The weekly schedule table collapses into a 3-level layout per day (times, sliders, and overrides are separated), making it easy to drag sliders and check options on touchscreens. Inputs collapse into a single-column layout.
+*   **Cache-Control Protection:** The HTTP server sends `Cache-Control` headers, forcing mobile browsers to always load the latest design, preventing interface updates from being cached.
 
 ---
 
@@ -139,7 +147,7 @@ python deye_besen_controller.py
 ### D) Compiling to a Standalone `.exe`
 To avoid path character encoding errors in Windows paths with accents, compilation is recommended via temporary clean directories:
 ```powershell
-py -m PyInstaller --onefile --clean --distpath "C:\Users\Ignis\.gemini\antigravity\dist_temp" --workpath "C:\Users\Ignis\.gemini\antigravity\build_temp" deye_besen_controller.py
+py -m PyInstaller --onefile --clean --distpath "C:\Users\<Username>\dist_temp" --workpath "C:\Users\<Username>\build_temp" deye_besen_controller.py
 ```
 Once compilation completes, copy the generated `deye_besen_controller.exe` from `dist_temp` back to the project root directory.
 

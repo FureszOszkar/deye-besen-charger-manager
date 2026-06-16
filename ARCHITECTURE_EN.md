@@ -130,6 +130,12 @@ If `"web_auth_enabled"` is active in the configuration, the server validates the
 * **Unauthorized Access**: If a request lacks a valid session token, requesting `/` returns the glassmorphic login interface (`LOGIN_HTML`), while other API endpoints (e.g., `/api/status`, `/api/config`) return a `401 Unauthorized` HTTP error with a `{"status": "unauthorized", "message": "Autentikáció szükséges!"}` JSON payload.
 * **Exception**: Fetching `/background.png` is allowed without authentication so that the login screen background can load properly.
 
+### Responsiveness and Mobile Navigation (Client-Side)
+The Web Dashboard uses responsive CSS design with a breakpoint at `1024px`. Above this width, it displays a side-by-side desktop layout; below it, it transitions to a single-card mobile layout.
+*   **Mobile View Manager (`showSection`):** Mobile section switching is managed purely via client-side JavaScript. Clicking items in the mobile overlay menu calls `showSection(sectionId)`, which hides other main container cards and displays only the active container at full screen width, preventing layout stretching.
+*   **Cache-Control Headers**: To prevent layout rendering anomalies due to browser caching, the `/` web endpoint returns explicit HTTP caching headers set to `no-cache`, `no-store`, and `must-revalidate`.
+*   **Tooltip Layout and Event Handling:** On mobile, tooltips display downwards below the info icons (preventing overlap with the sticky header), are restricted to `220px` in width, and align to the right on right-side components to avoid screen overflow. A global client-side event listener blocks click propagation on `.tooltip-container` elements, preventing accidental toggle changes on parent checkboxes.
+
 ### Endpoints
 * **`GET /`**: Serves the single-page Dashboard HTML (`DASHBOARD_HTML` when authenticated) or the login card (`LOGIN_HTML` when unauthorized).
 * **`GET /background.png`**: Serves the background image from the executable directory (handles PyInstaller temporary folder environments).

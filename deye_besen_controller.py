@@ -477,6 +477,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-family: 'Outfit', sans-serif;
         }
 
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
         body {
             background-color: var(--bg-color);
             background-image: url('/background.png');
@@ -620,96 +628,141 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             align-content: start;
         }
 
-        @media (max-width: 968px) {
-            main {
-                grid-template-columns: 1fr;
-            }
+        /* Mobil státusz sáv stílusa */
+        .status-bar-mobile {
+            display: none;
+            position: sticky;
+            top: 54px; /* A header magassága után */
+            z-index: 99;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.4rem 0.8rem;
+            justify-content: space-around;
+            align-items: center;
+            font-size: 0.75rem;
+            width: 100%;
         }
 
-        @media (max-width: 600px) {
-            header {
-                position: sticky;
-                top: 0;
-                z-index: 100;
-                flex-direction: column;
-                align-items: center;
-                gap: 0.8rem;
-                text-align: center;
-                padding: 1rem 0.6rem;
-                background: rgba(15, 23, 42, 0.85) !important;
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-            }
-            .logo-section h1 {
-                font-size: 1.4rem;
-            }
-            .header-status-container {
-                flex-wrap: wrap;
-                justify-content: center;
-                gap: 0.5rem;
-                width: 100%;
-            }
-            .status-group {
-                flex-wrap: wrap;
-                justify-content: center;
-                width: 100%;
-                gap: 0.4rem;
-            }
-            .status-divider {
-                display: none !important;
-            }
-            #logout-divider {
-                display: none !important;
-            }
-            .card {
-                padding: 0.8rem;
-                min-height: auto; /* Engedjük a kártyáknak az auto magasságot mobilon a kevesebb görgetésért */
-            }
-            .mode-selector {
-                position: sticky;
-                top: 105px; /* A fenti sticky header magasságához igazítva */
-                z-index: 90;
-                background: rgba(15, 23, 42, 0.92) !important;
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-                border: 1px solid var(--border-color);
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-                margin-top: 0.2rem;
-                margin-bottom: 0.6rem;
-            }
-            .config-form {
-                grid-template-columns: 1fr !important;
-                gap: 0.6rem;
-            }
-            .config-form > .input-group,
-            .config-form > div {
-                grid-column: span 1 !important;
-            }
-            .mode-btn {
-                padding: 0.4rem 0.2rem;
-                font-size: 0.75rem;
-            }
-            .manual-btn-group > div {
-                flex-direction: column !important;
-                gap: 0.6rem !important;
-            }
-            .schedule-row {
-                grid-template-columns: 70px 30px 1fr 1fr;
-                grid-template-rows: auto auto;
-                justify-content: space-between;
-                gap: 0.4rem;
-                padding: 0.5rem;
-            }
-            .schedule-row .slider-container {
-                grid-column: span 2;
-            }
-            .schedule-row div:last-child {
-                grid-column: span 2;
-                justify-content: flex-start;
-            }
-            .login-container {
-                padding: 1.5rem;
-            }
+        .status-dot-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .status-dot-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #64748b;
+        }
+
+        .status-dot-item.active {
+            color: var(--success);
+        }
+
+        .status-dot-item.active .dot {
+            background-color: var(--success);
+            box-shadow: 0 0 6px var(--success);
+        }
+
+        .status-dot-item.inactive {
+            color: var(--danger);
+        }
+
+        .status-dot-item.inactive .dot {
+            background-color: var(--danger);
+            box-shadow: 0 0 6px var(--danger);
+        }
+
+        /* Automatikus módok színei a státusz sávban (cián szín) */
+        .status-dot-item.auto-active.active {
+            color: #22d3ee;
+        }
+        .status-dot-item.auto-active.active .dot {
+            background-color: #22d3ee;
+            box-shadow: 0 0 8px #22d3ee;
+        }
+
+        /* Hamburger gomb */
+        .hamburger-btn {
+            display: none;
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            font-size: 1.6rem;
+            cursor: pointer;
+            padding: 0.2rem 0.5rem;
+            z-index: 110;
+            outline: none;
+        }
+
+        /* Mobil menü overlay */
+        .mobile-menu-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(11, 15, 25, 0.97);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            z-index: 105;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 1.2rem;
+            padding: 2rem;
+            transition: opacity 0.25s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .mobile-menu-overlay.open {
+            display: flex;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .menu-item {
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            padding: 0.6rem 1.5rem;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 300px;
+            text-align: center;
+            border: 1px solid transparent;
+        }
+
+        .menu-item:hover, .menu-item.active {
+            color: var(--primary);
+            background: rgba(56, 189, 248, 0.08);
+            border-color: rgba(56, 189, 248, 0.2);
+        }
+
+        .menu-item.logout-item {
+            color: var(--danger);
+            margin-top: 1rem;
+        }
+
+        .menu-item.logout-item:hover {
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .menu-divider {
+            width: 50%;
+            height: 1px;
+            background: var(--border-color);
+            margin: 0.5rem 0;
         }
 
         .card {
@@ -1274,6 +1327,132 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .tooltip-align-left:hover .tooltip-text {
             transform: translateX(0) translateY(-2px);
         }
+
+        /* Mobil töréspontok és stílusok (megemelt határral) */
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+                padding: 0.4rem;
+            }
+            header {
+                position: sticky;
+                top: 0;
+                z-index: 100;
+                flex-direction: row !important;
+                justify-content: space-between;
+                align-items: center;
+                gap: 0.8rem;
+                padding: 0.8rem 1rem;
+                background: rgba(15, 23, 42, 0.85) !important;
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+            }
+            .logo-section h1 {
+                font-size: 1.2rem;
+            }
+            .logo-section p {
+                font-size: 0.7rem;
+            }
+            .header-status-container {
+                display: none !important;
+            }
+            .hamburger-btn {
+                display: block !important;
+            }
+            .status-bar-mobile {
+                display: flex !important;
+            }
+            .card {
+                padding: 0.5rem;
+                min-height: auto;
+            }
+            .mode-selector {
+                /* Elrejtjük a kártyán belüli tabválasztót mobilon, mert a hamburger menü vezérli */
+                display: none !important;
+            }
+            .config-form {
+                grid-template-columns: 1fr !important;
+                gap: 0.6rem;
+            }
+            .config-form > .input-group,
+            .config-form > div {
+                grid-column: span 1 !important;
+            }
+            .save-btn {
+                grid-column: span 1 !important;
+                width: 100%;
+            }
+            .mode-btn {
+                padding: 0.4rem 0.2rem;
+                font-size: 0.75rem;
+            }
+            .manual-btn-group > div {
+                flex-direction: column !important;
+                gap: 0.6rem !important;
+            }
+            
+            /* Ütemezési naptár 3 szintes mobil nézete (prevent stretching with optimized columns, smaller gap and padding) */
+            .schedule-row {
+                grid-template-columns: 65px 22px 1fr 1fr;
+                grid-template-rows: auto auto auto;
+                justify-content: space-between;
+                gap: 0.4rem;
+                padding: 0.4rem;
+            }
+            .schedule-row .slider-container {
+                grid-column: span 4;
+            }
+            .schedule-row .slider-container input[type="range"] {
+                min-width: 0;
+                width: 100%;
+            }
+            .schedule-row input[type="time"] {
+                width: 65px !important;
+                max-width: 65px !important;
+                padding: 0.2rem 0.1rem;
+            }
+            .schedule-row div:last-child {
+                grid-column: span 4;
+                justify-content: flex-start;
+            }
+            
+            .login-container {
+                padding: 1.5rem;
+            }
+
+            /* Tooltipek lefelé történő megjelenítése mobilon és szélesség korlátozása (jobbra kilógás ellen) */
+            .tooltip-text {
+                bottom: auto !important;
+                top: 130% !important;
+                width: 220px !important;
+            }
+            .tooltip-text::after {
+                top: auto !important;
+                bottom: 100% !important;
+                border-color: transparent transparent #0f172a transparent !important;
+            }
+            .tooltip-container:hover .tooltip-text {
+                transform: translateX(-50%) translateY(2px) !important;
+            }
+
+            /* Jobbra igazított tooltipek a jobb szélhez közeli ikonokhoz (balra terjeszkednek) */
+            #config-auto .tooltip-text,
+            #config-schedule .tooltip-text,
+            #config-force .tooltip-text,
+            .metric-grid > div:nth-child(even) .tooltip-text {
+                left: auto !important;
+                right: -10px !important;
+                transform: translateY(2px) !important;
+            }
+            #config-auto .tooltip-text::after,
+            #config-schedule .tooltip-text::after,
+            #config-force .tooltip-text::after,
+            .metric-grid > div:nth-child(even) .tooltip-text::after {
+                left: auto !important;
+                right: 15px !important;
+                margin-left: 0 !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1283,6 +1462,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <h1>Deye & BESEN</h1>
             <p>Helyi Napelemes Töltésvezérlő és Felügyelet</p>
         </div>
+        <button class="hamburger-btn" id="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
         <div class="header-status-container">
             <div class="status-group">
                 <span class="status-group-label">Kapcsolatok:</span>
@@ -1329,6 +1509,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
     </header>
+
+    <!-- Mobil tapadós státusz sáv -->
+    <div class="status-bar-mobile" id="status-bar-mobile">
+        <div class="status-dot-item" id="mobile-status-deye">
+            <div class="dot"></div>
+            <span>Deye</span>
+        </div>
+        <div class="status-dot-item" id="mobile-status-besen">
+            <div class="dot"></div>
+            <span>BESEN</span>
+        </div>
+        <div class="status-dot-item auto-active" id="mobile-status-auto">
+            <div class="dot"></div>
+            <span>Auto</span>
+        </div>
+        <div class="status-dot-item auto-active" id="mobile-status-schedule">
+            <div class="dot"></div>
+            <span>Ütemezett</span>
+        </div>
+    </div>
+
+    <!-- Mobil navigációs menü overlay -->
+    <div id="mobile-menu" class="mobile-menu-overlay">
+        <div class="menu-item active" id="menu-item-auto" onclick="showSection('auto')">Auto Solar</div>
+        <div class="menu-item" id="menu-item-schedule" onclick="showSection('schedule')">Ütemezett</div>
+        <div class="menu-item" id="menu-item-force" onclick="showSection('force')">Kézi mód</div>
+        <div class="menu-item" id="menu-item-measurements" onclick="showSection('measurements')">Mérések</div>
+        <div class="menu-item" id="menu-item-log" onclick="showSection('log')">Napló</div>
+        <div class="menu-divider"></div>
+        <div class="menu-item logout-item" id="mobile-menu-logout" style="display: none;" onclick="logout()">Kijelentkezés</div>
+    </div>
 
     <main>
         <!-- BAL OLDAL: ÁLLAPOTOK ÉS BEÁLLÍTÁSOK -->
@@ -1422,19 +1633,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div class="checkbox-group" style="margin-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; display: flex; align-items: center; gap: 0.5rem;">
                         <input type="checkbox" id="schedule_enabled" onchange="saveScheduleEnabled()" style="cursor:pointer; width: 1.2rem; height: 1.2rem;">
                         <label for="schedule_enabled" style="font-size: 1.05rem; cursor:pointer; font-weight:700; color: #c084fc; display: inline-flex; align-items: center;">
-                            Időzített (naptár szerinti) mód bekapcsolása
+                            Időzített töltés bekapcsolása
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha be van kapcsolva, a rendszer a lenti táblázatban beállított napokon és időablakokban automatikusan elindítja a töltést a megadott áramerősséggel.</span></span>
                         </label>
                     </div>
                     <div class="checkbox-group" style="margin-bottom: 0.4rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3rem;">
                         <input type="checkbox" id="schedule_solar_auto" onchange="saveScheduleSolarAuto()">
                         <label for="schedule_solar_auto" style="font-size:0.9rem; cursor:pointer; font-weight:600; display: inline-flex; align-items: center;">
-                            Napelemes szabályok futtatása az időablakokon kívül
+                            Ütemezés végén Solar Auto mód
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha be van kapcsolva, akkor az időzített időablakokon kívüli időszakokban a rendszer nem állítja le a töltést teljesen, hanem a napelemes (Solar Auto) szabályok alapján vezérli azt.</span></span>
                         </label>
                     </div>
                     <div style="font-size:0.85rem; color:var(--text-muted); text-align:center; margin-bottom: 0.3rem;">
-                        Heti egyedi ütemezés, áramkorlátok és prioritások a napokra:
+                        Ütemezett heti beállítások
                     </div>
                     <div class="schedule-table" id="schedule-rows-container">
                         <!-- JavaScript tölti fel a napokat -->
@@ -2165,15 +2376,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Kijelentkezés gomb láthatóságának kezelése
                 const logoutDiv = document.getElementById('logout-divider');
                 const logoutGrp = document.getElementById('logout-group');
+                const mobLogout = document.getElementById('mobile-menu-logout');
                 if (data.web_auth_enabled) {
                     logoutDiv.style.display = 'block';
                     logoutGrp.style.display = 'inline-flex';
+                    if (mobLogout) mobLogout.style.display = 'block';
                 } else {
                     logoutDiv.style.display = 'none';
                     logoutGrp.style.display = 'none';
+                    if (mobLogout) mobLogout.style.display = 'none';
                 }
-
-                // Fejléc aktív státusz kijelzése (DOM elem eltávolítva)
 
                 // Inverter kapcsolat
                 const inverterBadge = document.getElementById('badge-inverter');
@@ -2294,6 +2506,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const badgeSchedule = document.getElementById('badge-toggle-schedule');
                 if (badgeSchedule) {
                     badgeSchedule.className = data.schedule_enabled ? 'badge active' : 'badge off';
+                }
+
+                // Mobil státusz sáv indikátorok frissítése
+                const mobDeye = document.getElementById('mobile-status-deye');
+                if (mobDeye) {
+                    mobDeye.className = "status-dot-item " + (data.inverter_connected ? "active" : "inactive");
+                }
+                const mobBesen = document.getElementById('mobile-status-besen');
+                if (mobBesen) {
+                    mobBesen.className = "status-dot-item " + (data.charger_connected ? "active" : "inactive");
+                }
+                const mobAuto = document.getElementById('mobile-status-auto');
+                if (mobAuto) {
+                    mobAuto.className = "status-dot-item auto-active " + (data.auto_enabled ? "active" : "off");
+                }
+                const mobSchedule = document.getElementById('mobile-status-schedule');
+                if (mobSchedule) {
+                    mobSchedule.className = "status-dot-item auto-active " + (data.schedule_enabled ? "active" : "off");
                 }
 
                 // Felülbírálás banner és visszavonás gomb láthatósága
@@ -2489,6 +2719,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         let activeTab = 'auto';
+        let currentSection = 'auto';
 
         function selectTab(tab) {
             activeTab = tab;
@@ -2504,9 +2735,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('config-force').style.display = activeTab === 'force' ? 'flex' : 'none';
         }
 
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobile-menu');
+            const btn = document.getElementById('hamburger-btn');
+            if (menu.classList.contains('open')) {
+                menu.classList.remove('open');
+                btn.innerText = '☰';
+            } else {
+                menu.classList.add('open');
+                btn.innerText = '✕';
+            }
+        }
 
+        function showSection(section) {
+            currentSection = section;
+            
+            // Hamburger menü kijelölés frissítése
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+            const activeMenuItem = document.getElementById('menu-item-' + section);
+            if (activeMenuItem) activeMenuItem.classList.add('active');
+            
+            const isMobile = window.innerWidth <= 1024;
+            
+            // Kártyák kiválasztása DOM-ból
+            const cards = document.querySelectorAll('main > .card');
+            const configCard = cards[0];
+            const telemetryCard = cards[1];
+            const simCard = document.getElementById('sim-panel-card');
+            const logCard = document.querySelector('.console-container');
+            
+            if (isMobile) {
+                // Mobilon mindent elrejtünk, majd csak a kiválasztottat mutatjuk meg
+                if (configCard) configCard.style.display = 'none';
+                if (telemetryCard) telemetryCard.style.display = 'none';
+                if (simCard) simCard.style.display = 'none';
+                if (logCard) logCard.style.display = 'none';
+                
+                if (section === 'auto' || section === 'schedule' || section === 'force') {
+                    if (configCard) configCard.style.display = 'flex';
+                    selectTab(section);
+                } else if (section === 'measurements') {
+                    if (telemetryCard) telemetryCard.style.display = 'flex';
+                } else if (section === 'log') {
+                    if (logCard) logCard.style.display = 'block';
+                }
+                
+                // Menü bezárása
+                const menu = document.getElementById('mobile-menu');
+                if (menu) menu.classList.remove('open');
+                const btn = document.getElementById('hamburger-btn');
+                if (btn) btn.innerText = '☰';
+            } else {
+                // Asztali nézetben mindent visszaállítunk a megszokott grid elrendezésre
+                if (configCard) configCard.style.display = 'flex';
+                if (telemetryCard) telemetryCard.style.display = 'flex';
+                
+                if (simCard) {
+                    const simToggle = document.getElementById('sim_enabled');
+                    simCard.style.display = (simToggle && simToggle.checked) ? 'flex' : 'none';
+                }
+                if (logCard) logCard.style.display = 'block';
+                
+                if (section === 'auto' || section === 'schedule' || section === 'force') {
+                    selectTab(section);
+                }
+            }
+        }
 
-
+        // Képernyő átméretezéskor frissítjük a láthatóságot
+        window.addEventListener('resize', () => {
+            showSection(currentSection);
+        });
 
         async function triggerForceSubmode(submode) {
             try {
@@ -2614,7 +2913,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Szimulációs API segédfüggvények
         async function toggleSimulationMode() {
             const isChecked = document.getElementById('sim_mode_toggle').checked;
             try {
@@ -2689,7 +2987,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // 2 másodpercenkénti frissítés
+        // Megakadályozzuk, hogy a tooltip ikonra kattintás elnyomja a checkboxokat vagy más elemeket
+        document.querySelectorAll('.tooltip-container').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+            });
+        });
+
+        showSection('auto');
         setInterval(updateStatus, 2000);
         updateStatus();
     </script>
@@ -2700,7 +3006,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 # --- HTTP KÉRÉS KEZELŐ KILENS ---
 class ControllerHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Elnémítjuk a konzolos http naplózást
         pass
 
     def get_cookie(self, name):
@@ -2749,6 +3054,9 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             if self.path == '/':
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                self.send_header('Pragma', 'no-cache')
+                self.send_header('Expires', '0')
                 self.end_headers()
                 self.wfile.write(LOGIN_HTML.encode('utf-8'))
             else:
@@ -2761,6 +3069,9 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
         if self.path == '/':
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             self.wfile.write(DASHBOARD_HTML.encode('utf-8'))
         elif self.path == '/api/status':
