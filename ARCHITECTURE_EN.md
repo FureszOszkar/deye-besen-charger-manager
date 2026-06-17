@@ -52,6 +52,7 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 ### 1. `run_inverter_polling()`
 * **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds.
 * **Library:** `pysolarmanv5` (connecting on TCP port `8899`).
+* **Threading Safety (Asynchronization):** Since `pysolarmanv5` Modbus polling contains synchronous blocking network calls, these operations are isolated inside a blocking helper `fetch_inverter_data_blocking()` and run in a separate background worker thread using `asyncio.to_thread()`. This prevents network glitches on the Deye logger stick from blocking the main event loop and causing Bluetooth timeout disconnects.
 * **Queried Registers:**
   * **Register 607 (Signed 16-bit):** Inverter grid-port power (internal grid meter).
   * **Register 619 (Signed 16-bit):** Utility grid power (measured by external CT clamps at the meter).
@@ -64,6 +65,8 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 ### 2. `run_ble_client()`
 * **Task:** Manages the BLE connection to the BESEN BS20 car charger, processes the `ble_command_queue`, and receives notifications.
 * **Library:** `bleak`.
+* **Timeouts and Safe Wrappers:** Bluetooth write and notify registrations lack built-in timeout handling in Bleak. To prevent freezes, all interactions are performed via custom wrappers `safe_ble_write()` and `safe_ble_start_notify()`, which enforce a 5.0 second timeout limit using `asyncio.wait_for()`. Any error or timeout triggers a clean client disconnection to start the reconnection loop.
+* **Telemetry Watchdog:** The client tracks telemetry activity via a global `last_rx_time` timestamp. If the connection state is `LOGGED_IN` but no telemetry packets are received from the charger for 15 seconds, the watchdog triggers a connection reset and cleanly restarts the BLE discovery and reconnection process.
 * **Important GATT UUIDs:**
   * `FFE4` (Notify): Where the charger streams its telemetry (voltage, current feedback, temperature, status).
   * `FFF3` (Write): Used to write commands (Start, Stop, Current limits).

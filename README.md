@@ -2,7 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi hálózaton (offline) futó integrált vezérlőmegoldás, amely összekapcsolja a **Deye háromfázisú hibrid invertert** és a **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja a napelemes energiatermelés és a háztartási akkumulátor állapotának figyelembevételével az elektromos autó töltésének teljesen automata, intelligens és biztonságos vezérlése.
-<img width="1892" height="897" alt="kép" src="https://github.com/user-attachments/assets/a8575bed-5ae8-4413-9d2a-73399697c44f" />
 
 ---
 
@@ -120,7 +119,10 @@ A szoftver számos beépített biztonsági funkcióval rendelkezik a hardverek, 
     *   Amennyiben nincs szükség védelemre, az a konfigurációból kikapcsolható (`"web_auth_enabled": false`).
 2.  **Mágneskapcsoló kímélés (Relay Guard):** Sikertelen vagy leállított töltés után a program **2 perc (120 másodperc) kötelező várakozási időt (cooldown)** tart. Ezen idő alatt semmilyen automatizmus nem indíthatja újra a töltést, megelőzve a töltő reléinek gyors tönkremenetelét (beégését).
 3.  **Háromszori hiba utáni leállás (Fail-Safe Disarm):** Ha a töltésindítási parancs után 60 másodpercen belül a telemetria alapján nem indul el a töltés, a program hibát naplóz. Ha ez egymás után 3 alkalommal előfordul, a rendszer biztonsági okokból leállítja a próbálkozást és átvált **Figyelés (Monitoring)** módba, elkerülve a végtelenített BLE parancsküldési ciklusokat.
-
+4.  **Hálózati Aszinkronizáció és Telemetria Watchdog (Kapcsolat-helyreállítás):**
+    *   A Deye inverter szinkron lekérdezései (`pysolarmanv5`) egy teljesen elkülönített háttérszálon futnak, így a hálózati ingadozások nem tudják blokkolni a fő eseményhurkot.
+    *   Minden Bluetooth írás és feliratkozás 5 másodperces szigorú időkorlát-védelem alatt áll.
+    *   Ha a kapcsolat állapota `LOGGED_IN`, de 15 másodpercig nem érkezik telemetriai adat a töltőtől, a program automatikusan lezárja a fagyott kapcsolatot, és újracsatlakozási folyamatot indít, biztosítva a teljesen felügyelet nélküli automatikus működést.
 
 ---
 

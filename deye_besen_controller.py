@@ -3408,7 +3408,7 @@ async def process_assembled_packet(packet, client):
             log_message("-> [HANDSHAKE] Identity Ack (0x8002) csomag küldése...")
             ack_packet = create_ble_packet(0x8002, b"")
             try:
-                await client.write_gatt_char(CHAR_FFE9_WRITE, ack_packet, response=True)
+                await safe_ble_write(client, CHAR_FFE9_WRITE, ack_packet, response=True)
                 ble_state = "SENT_IDENTITY_ACK"
                 last_identity_ack_time = current_time
                 log_message("-> [BLE WRITE SUCCESS] Identity Ack (0x8002) elküldve a FFE9-re!")
@@ -3420,7 +3420,7 @@ async def process_assembled_packet(packet, client):
                 log_message("-> [HANDSHAKE RETRY] Identity Ack (0x8002) újraküldése...")
                 ack_packet = create_ble_packet(0x8002, b"")
                 try:
-                    await client.write_gatt_char(CHAR_FFE9_WRITE, ack_packet, response=True)
+                    await safe_ble_write(client, CHAR_FFE9_WRITE, ack_packet, response=True)
                     last_identity_ack_time = current_time
                 except Exception as e:
                     log_message(f"-> [BLE WRITE ERROR] Ack újraküldési hiba: {e}")
@@ -3432,7 +3432,7 @@ async def process_assembled_packet(packet, client):
             login_payload.extend([(ts >> 24) & 0xFF, (ts >> 16) & 0xFF, (ts >> 8) & 0xFF, ts & 0xFF])
             login_packet = create_ble_packet(0x8001, bytes(login_payload))
             try:
-                await client.write_gatt_char(CHAR_FFE9_WRITE, login_packet, response=True)
+                await safe_ble_write(client, CHAR_FFE9_WRITE, login_packet, response=True)
                 ble_state = "SENT_LOGIN"
                 last_login_time = current_time
                 log_message("-> [BLE WRITE SUCCESS] Bejelentkezési parancs elküldve a FFE9-re!")
@@ -3447,7 +3447,7 @@ async def process_assembled_packet(packet, client):
                 login_payload.extend([(ts >> 24) & 0xFF, (ts >> 16) & 0xFF, (ts >> 8) & 0xFF, ts & 0xFF])
                 login_packet = create_ble_packet(0x8001, bytes(login_payload))
                 try:
-                    await client.write_gatt_char(CHAR_FFE9_WRITE, login_packet, response=True)
+                    await safe_ble_write(client, CHAR_FFE9_WRITE, login_packet, response=True)
                     last_login_time = current_time
                 except Exception as e:
                     log_message(f"-> [BLE WRITE ERROR] Login újraküldési hiba: {e}")
@@ -3458,7 +3458,7 @@ async def process_assembled_packet(packet, client):
             last_identity_ack_time = current_time
             ack_packet = create_ble_packet(0x8002, b"")
             try:
-                await client.write_gatt_char(CHAR_FFE9_WRITE, ack_packet, response=True)
+                await safe_ble_write(client, CHAR_FFE9_WRITE, ack_packet, response=True)
                 log_message("-> [BLE WRITE SUCCESS] Identity Ack (0x8002) elküldve újrakapcsolódáshoz!")
             except Exception as e:
                 log_message(f"-> [BLE WRITE ERROR] Újrakapcsolódási Ack küldési hiba: {e}")
@@ -3467,7 +3467,7 @@ async def process_assembled_packet(packet, client):
         log_message("-> [HEARTBEAT] Ping (0x0003) érkezett, Heartbeat Pong (0x8003) küldése...")
         pong_packet = create_ble_packet(0x8003, b"\x01")
         try:
-            await client.write_gatt_char(CHAR_FFE9_WRITE, pong_packet, response=True)
+            await safe_ble_write(client, CHAR_FFE9_WRITE, pong_packet, response=True)
             log_message("-> [BLE WRITE SUCCESS] Heartbeat Pong (0x8003) sikeresen elküldve!")
         except Exception as e:
             log_message(f"-> [BLE WRITE ERROR] Heartbeat Pong küldési hiba: {e}")
@@ -3483,7 +3483,7 @@ async def process_assembled_packet(packet, client):
             login_payload.extend([(ts >> 24) & 0xFF, (ts >> 16) & 0xFF, (ts >> 8) & 0xFF, ts & 0xFF])
             login_packet = create_ble_packet(0x8001, bytes(login_payload))
             try:
-                await client.write_gatt_char(CHAR_FFE9_WRITE, login_packet, response=True)
+                await safe_ble_write(client, CHAR_FFE9_WRITE, login_packet, response=True)
                 ble_state = "SENT_LOGIN"
                 last_login_time = current_time
                 log_message("-> [BLE WRITE SUCCESS] Bejelentkezési parancs elküldve a FFE9-re!")
@@ -3504,7 +3504,7 @@ async def process_assembled_packet(packet, client):
             login_payload.extend([(ts >> 24) & 0xFF, (ts >> 16) & 0xFF, (ts >> 8) & 0xFF, ts & 0xFF])
             login_packet = create_ble_packet(0x8001, bytes(login_payload))
             try:
-                await client.write_gatt_char(CHAR_FFE9_WRITE, login_packet, response=True)
+                await safe_ble_write(client, CHAR_FFE9_WRITE, login_packet, response=True)
                 ble_state = "SENT_LOGIN"
                 last_login_time = current_time
                 log_message("-> [BLE WRITE SUCCESS] Bejelentkezési parancs elküldve a FFE9-re!")
@@ -3558,7 +3558,8 @@ async def process_assembled_packet(packet, client):
 
 # BLE Értesítéskezelő (GATT NOTIFY) callback
 def ble_notification_received(sender, data_bytes):
-    global ble_rx_buffer, active_ble_client
+    global ble_rx_buffer, active_ble_client, last_rx_time
+    last_rx_time = time.time()
     
     # Külön kezeljük a FFC2 jelszó visszaigazolást
     sender_str = str(sender).lower()
@@ -3686,7 +3687,7 @@ async def run_ble_client():
                 
                 # 1. Feliratkozás a jelszó visszaigazolásra (FFC2)
                 try:
-                    await client.start_notify(CHAR_FFC2_NOTIFY, ble_notification_received)
+                    await safe_ble_start_notify(client, CHAR_FFC2_NOTIFY, ble_notification_received)
                     log_message("-> [NOTIFY] Feliratkozás az FFC2 (jelszó státusz) csatornára aktív.")
                 except Exception as e:
                     log_message(f"-> [NOTIFY ERROR] FFC2 feliratkozási hiba: {e}")
@@ -3709,7 +3710,7 @@ async def run_ble_client():
                 # Első kísérlet a megadott jelszóval
                 try:
                     log_message(f"-> [BLE AUTH] Jelszó küldése az FFC1 csatornára: {auth_pwd.hex().upper()}")
-                    await client.write_gatt_char(CHAR_FFC1_WRITE, auth_pwd, response=False)
+                    await safe_ble_write(client, CHAR_FFC1_WRITE, auth_pwd, response=False)
                 except Exception as e:
                     log_message(f"-> [BLE AUTH ERROR] Jelszó küldési hiba: {e}")
                 
@@ -3727,7 +3728,7 @@ async def run_ble_client():
                     default_pwd = b"000000000000"
                     try:
                         log_message(f"-> [BLE AUTH] Gyári jelszó küldése az FFC1 csatornára: {default_pwd.hex().upper()}")
-                        await client.write_gatt_char(CHAR_FFC1_WRITE, default_pwd, response=False)
+                        await safe_ble_write(client, CHAR_FFC1_WRITE, default_pwd, response=False)
                         await asyncio.wait_for(ble_auth_event.wait(), timeout=2.0)
                         if ble_auth_status == 0:
                             log_message("-> [SZINKRON] A gyári jelszó sikeres volt a BLE chip feloldásához. A csomagok fejlécében a konfigurált jelszót használjuk.")
@@ -3735,29 +3736,41 @@ async def run_ble_client():
                         log_message(f"-> [BLE AUTH ERROR] Gyári jelszó küldési hiba: {e}")
                 
                 # 3. Feliratkozás az UART olvasó csatornára (FFE4)
-                await client.start_notify(CHAR_FFE4_NOTIFY, ble_notification_received)
+                await safe_ble_start_notify(client, CHAR_FFE4_NOTIFY, ble_notification_received)
                 log_message("-> [NOTIFY] Feliratkozás az FFE4 (READ) csatornára aktív.")
                 
                 try:
-                    await client.start_notify(CHAR_FFF3_WRITE, ble_notification_received)
+                    await safe_ble_start_notify(client, CHAR_FFF3_WRITE, ble_notification_received)
                     log_message("-> [NOTIFY] Feliratkozás az FFF3 csatornára aktív.")
                 except Exception as e:
                     log_message(f"-> [NOTIFY ERROR] FFF3 feliratkozási hiba: {e}")
                     
                 try:
-                    await client.start_notify(CHAR_FFD3_NOTIFY, ble_notification_received)
+                    await safe_ble_start_notify(client, CHAR_FFD3_NOTIFY, ble_notification_received)
                     log_message("-> [NOTIFY] Feliratkozás az FFD3 csatornára aktív.")
                 except Exception as e:
                     log_message(f"-> [NOTIFY ERROR] FFD3 feliratkozási hiba: {e}")
                     
                 try:
-                    await client.start_notify(CHAR_FD02_NOTIFY, ble_notification_received)
+                    await safe_ble_start_notify(client, CHAR_FD02_NOTIFY, ble_notification_received)
                     log_message("-> [NOTIFY] Feliratkozás az FD02 csatornára aktív.")
                 except Exception as e:
                     log_message(f"-> [NOTIFY ERROR] FD02 feliratkozási hiba: {e}")
                 
+                # Watchdog inicializálása a friss kapcsolathoz
+                global last_rx_time
+                last_rx_time = time.time()
+                
                 # Kapcsolat alatti parancsküldő hurok
                 while client.is_connected:
+                    # Watchdog ellenőrzés: ha bejelentkezett állapotban vagyunk és 15 másodperce nem kaptunk adatot, megszakítjuk a kapcsolatot
+                    if ble_state == "LOGGED_IN" and time.time() - last_rx_time > 15.0:
+                        log_message("-> [WATCHDOG TIMEOUT] Nincs beérkező telemetria 15 másodperce. Kapcsolat kényszerített lezárása...")
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+                        raise Exception("Telemetria timeout (15s)")
                     try:
                         # Ha érkezik parancs a sorba, azonnal kiküldjük
                         packet = ble_command_queue.get_nowait()
@@ -3773,7 +3786,7 @@ async def run_ble_client():
                         log_message(f"BLE Parancs kiküldése: {cmd_name} (Hossz: {len(packet)} bájt)")
                         
                         # A parancsokat is az FFE9 (UART RX) csatornára küldjük!
-                        await client.write_gatt_char(CHAR_FFE9_WRITE, packet, response=True)
+                        await safe_ble_write(client, CHAR_FFE9_WRITE, packet, response=True)
                         ble_command_queue.task_done()
                     except asyncio.QueueEmpty:
                         await asyncio.sleep(1)
@@ -3788,6 +3801,65 @@ async def run_ble_client():
             await asyncio.sleep(5)
 
 # Aszinkron Inverter adatlekérdező task
+# Globális telemetria időpont és BLE biztonsági wrapperek
+last_rx_time = 0.0
+
+async def safe_ble_write(client, char, data, response=True, timeout=5.0):
+    try:
+        await asyncio.wait_for(client.write_gatt_char(char, data, response=response), timeout=timeout)
+        return True
+    except Exception as e:
+        log_message(f"-> [BLE WRITE TIMEOUT/ERROR] Csatorna: {char}, Hiba: {e}. Kapcsolat kényszerített lezárása...")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise e
+
+async def safe_ble_start_notify(client, char, callback, timeout=5.0):
+    try:
+        await asyncio.wait_for(client.start_notify(char, callback), timeout=timeout)
+        return True
+    except Exception as e:
+        log_message(f"-> [BLE NOTIFY TIMEOUT/ERROR] Csatorna: {char}, Hiba: {e}. Kapcsolat kényszerített lezárása...")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise e
+
+def fetch_inverter_data_blocking():
+    # Solarman V5 alapú lekérdezés megnyitása a logger sticks felé
+    inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
+    
+    # Belső hálózati teljesítmény (Register 607) - Signed Short
+    grid_power_internal = to_signed_16(inverter.read_holding_registers(register_addr=607, quantity=1)[0])
+    # Külső hálózati teljesítmény (Register 619) - Signed Short
+    grid_power_external = to_signed_16(inverter.read_holding_registers(register_addr=619, quantity=1)[0])
+    # Házi Akkumulátor SoC (Register 588) - Unsigned Short
+    battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
+    # UPS terhelés / ház fogyasztás (Register 643) - Unsigned Short
+    ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
+    # Napelem termelés (Register 175) - Unsigned Short
+    pv_power = inverter.read_holding_registers(register_addr=175, quantity=1)[0]
+    # Akkumulátor terhelés (Register 590) - Signed Short
+    battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
+    
+    # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
+    charger_power = max(0, grid_power_external - grid_power_internal)
+    
+    inverter.disconnect()
+    
+    return {
+        "grid_power": grid_power_external,
+        "battery_soc": battery_soc,
+        "ups_load_power": ups_load_power,
+        "pv_power": pv_power,
+        "battery_power": battery_power,
+        "charger_power": charger_power
+    }
+
+# Aszinkron Inverter adatlekérdezés task (átdolgozva háttérszálon futó blocking hívásokkal)
 async def run_inverter_polling():
     global shared_state
     
@@ -3797,37 +3869,19 @@ async def run_inverter_polling():
             continue
             
         try:
-            # Solarman V5 alapú lekérdezés megnyitása a logger sticks felé
-            inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
-            
-            # Belső hálózati teljesítmény (Register 607) - Signed Short
-            grid_power_internal = to_signed_16(inverter.read_holding_registers(register_addr=607, quantity=1)[0])
-            # Külső hálózati teljesítmény (Register 619) - Signed Short
-            grid_power_external = to_signed_16(inverter.read_holding_registers(register_addr=619, quantity=1)[0])
-            # Házi Akkumulátor SoC (Register 588) - Unsigned Short
-            battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
-            # UPS terhelés / ház fogyasztás (Register 643) - Unsigned Short
-            ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
-            # Napelem termelés (Register 175) - Unsigned Short
-            pv_power = inverter.read_holding_registers(register_addr=175, quantity=1)[0]
-            # Akkumulátor terhelés (Register 590) - Signed Short
-            battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
-            
-            # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
-            charger_power = max(0, grid_power_external - grid_power_internal)
-            
-            inverter.disconnect()
+            # Háttérszálon hívjuk meg a szinkron lekérdezést, így nem blokkolja az asyncio event loopot
+            data = await asyncio.to_thread(fetch_inverter_data_blocking)
             
             with state_lock:
-                shared_state["grid_power"] = grid_power_external
-                shared_state["battery_soc"] = battery_soc
-                shared_state["ups_load_power"] = ups_load_power
-                shared_state["pv_power"] = pv_power
-                shared_state["battery_power"] = battery_power
-                shared_state["charger_power"] = charger_power
+                shared_state["grid_power"] = data["grid_power"]
+                shared_state["battery_soc"] = data["battery_soc"]
+                shared_state["ups_load_power"] = data["ups_load_power"]
+                shared_state["pv_power"] = data["pv_power"]
+                shared_state["battery_power"] = data["battery_power"]
+                shared_state["charger_power"] = data["charger_power"]
                 shared_state["inverter_connected"] = True
                 
-            log_message(f"Deye Inverter: Grid={grid_power_external}W, UPS={ups_load_power}W, Nem_UPS={charger_power}W, PV={pv_power}W, Akku={battery_power}W (SoC={battery_soc}%)")
+            log_message(f"Deye Inverter: Grid={data['grid_power']}W, UPS={data['ups_load_power']}W, Nem_UPS={data['charger_power']}W, PV={data['pv_power']}W, Akku={data['battery_power']}W (SoC={data['battery_soc']}%)")
             
         except Exception as e:
             with state_lock:

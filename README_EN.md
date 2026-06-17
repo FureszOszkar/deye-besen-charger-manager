@@ -119,6 +119,10 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   If authentication is not required, it can be disabled in the configuration (`"web_auth_enabled": false`).
 2.  **Relay Protection (Cooldown):** After any stopped or failed charging attempt, the program enforces a **2-minute (120 seconds) cooldown period**. During this time, no automation is allowed to restart charging, protecting the charger's physical relays from premature wear and welding.
 3.  **Fail-Safe Disarm:** If the charging fails to start within 60 seconds after a BLE start command, a failure is logged. If this happens 3 consecutive times, the system automatically stops further attempts and switches to **Figyelés (Monitoring)** mode to prevent endless BLE command cycles.
+4.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
+    *   Deye inverter synchronous Modbus requests (`pysolarmanv5`) run on a separate background worker thread, ensuring network interruptions do not freeze the main event loop.
+    *   All Bluetooth write and notification requests are constrained by a strict 5-second timeout limit.
+    *   If the connection state is `LOGGED_IN` but no telemetry packets arrive from the charger for 15 seconds, the built-in watchdog logs a timeout, closes the dead connection, and cleanly restarts the BLE discovery and reconnection process.
 
 
 ---

@@ -52,6 +52,7 @@ Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladato
 ### 1. `run_inverter_polling()`
 * **Feladat:** Kapcsolódás a Deye inverter Wi-Fi stickjéhez (Solarman LSW-3 egység) TCP-n keresztül, és a telemetriai adatok lekérdezése 10 másodpercenként.
 * **Használt könyvtár:** `pysolarmanv5` (Modbus RTU over TCP a `8899`-es porton).
+* **Szálkezelési biztonság (Aszinkronizáció):** Mivel a `pysolarmanv5` lekérdezései szinkron (blocking) hálózati műveletek, a hurokban ezeket a `fetch_inverter_data_blocking()` segédfüggvénybe szervezve, az `asyncio.to_thread()` segítségével egy külön háttérszálon hajtjuk végre. Ezzel megakadályozzuk, hogy az inverter esetleges hálózati kiesése vagy lassúsága blokkolja a fő programszálat és megszakítsa a Bluetooth kapcsolatot.
 * **Kiolvasott regiszterek:**
   * **Regiszter 607 (Signed 16-bit):** Inverter belső hálózati teljesítmény (Grid port).
   * **Regiszter 619 (Signed 16-bit):** Külső hálózati teljesítmény (a villanyóra melletti mérő CT-től).
@@ -64,6 +65,8 @@ Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladato
 ### 2. `run_ble_client()`
 * **Feladat:** A BESEN BS20 autótöltő Bluetooth BLE kapcsolatának kezelése, a küldési sorban (`ble_command_queue`) lévő parancsok kiküldése és a beérkező adatok fogadása.
 * **Használt könyvtár:** `bleak`.
+* **Időkorlátok és Biztonsági Wrapperek:** A Bluetooth írási és feliratkozási műveletek nem tartalmaznak beépített időkorlát-kezelést a Bleak-ben. Ennek kiküszöbölésére a parancsokat és feliratkozásokat a `safe_ble_write()` és `safe_ble_start_notify()` wrappers függvényeken keresztül hajtjuk végre, amelyek 5 másodperces `asyncio.wait_for` időkorlátot alkalmaznak. Sikertelen vagy túlnyúló művelet esetén a kapcsolat automatikusan bontásra kerül a tiszta újracsatlakozás érdekében.
+* **Telemetria Watchdog (Kapcsolatfigyelő):** A kliens folyamatosan frissíti a `last_rx_time` globális változót minden beérkező telemetria csomagnál. Ha a kapcsolat státusza `LOGGED_IN`, de 15 másodperce nem érkezett adatcsomag a töltőtől, a watchdog időtúllépést naplóz, megszakítja a kapcsolatot (`client.disconnect()`), és kezdeményezi a tiszta újracsatlakozási folyamatot.
 * **Kulcsfontosságú UUID-k:**
   * `FFE4` (Notify): Itt küldi a töltő folyamatosan a telemetriát (feszültségek, áramok, belső hőmérséklet, állapot).
   * `FFF3` (Write): Ide írjuk a vezérlőparancsokat (Indítás, Leállítás, Áramerősség állítás).
