@@ -308,6 +308,7 @@ last_login_time = 0.0
 active_ble_client = None      # Aktív BleakClient objektum a callbackekhez
 ble_auth_event = None
 ble_auth_status = None
+main_loop = None
 
 # Dinamikus BESEN BLE azonosítók (a parancsok aláírásához)
 charger_serial = bytearray([0x30, 0x99, 0x83, 0x18, 0x21, 0x29, 0x44, 0x19])
@@ -3617,11 +3618,20 @@ def ble_notification_received(sender, data_bytes):
         
         if len(packet) >= 4 and packet[-2:] == b'\x0f\x02':
             if active_ble_client is not None:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(process_assembled_packet(packet, active_ble_client))
-                except Exception:
-                    asyncio.create_task(process_assembled_packet(packet, active_ble_client))
+                if main_loop is not None:
+                    try:
+                        asyncio.run_coroutine_threadsafe(process_assembled_packet(packet, active_ble_client), main_loop)
+                    except Exception as e:
+                        print(f"Hiba a csomag ütemezésekor: {e}")
+                else:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(process_assembled_packet(packet, active_ble_client))
+                    except Exception:
+                        try:
+                            asyncio.create_task(process_assembled_packet(packet, active_ble_client))
+                        except Exception as e:
+                            print(f"Hiba a csomag aszinkron indításakor: {e}")
         else:
             print("Figyelmeztetés: Hibás csomagvégződés, elvetve.")
 
@@ -3670,8 +3680,10 @@ async def run_ble_client():
                 target = device
                 
             log_message(f"Kapcsolódás a következőhöz: {target}...")
-            # Időkorlát növelése 30 másodpercre a gyenge jel miatt
-            async with BleakClient(target, timeout=30.0) as client:
+            client = BleakClient(target)
+            try:
+                # Biztonságos csatlakozás aszinkron időkorláttal a WinRT/Bluetooth lefagyások elkerülésére
+                await asyncio.wait_for(client.connect(), timeout=20.0)
                 log_message(f"Sikeresen csatlakozva a BESEN töltőhöz: {CHARGER_MAC}")
                 with state_lock:
                     shared_state["charger_connected"] = True
@@ -3790,6 +3802,13 @@ async def run_ble_client():
                         ble_command_queue.task_done()
                     except asyncio.QueueEmpty:
                         await asyncio.sleep(1)
+            except Exception as e:
+                raise e
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
                         
         except Exception as e:
             with state_lock:
@@ -3961,6 +3980,38 @@ async def run_charge_controller():
             manual_start_requested = shared_state.get("manual_start_requested", False)
             restart_pending_start = shared_state.get("restart_pending_start", False)
 
+        # --- ALKALMAZÁSI ÉS ÚJRAINDÍTÁSI FLAGEK FELDOLGOZÁSA (Előrehozva a korai returnök elé) ---
+        # 1. Kézi leállítás (Soft Stop)
+        if apply_with_stop:
+            log_message("[VEZÉRLÉS] Felhasználói árammódosítás leállítással kérték. Töltés LEÁLLÍTÁSA...")
+            stop_payload = bytearray(47)
+            stop_payload[0] = 0x01
+            packet = create_ble_packet(0x8008, bytes(stop_payload))
+            await ble_command_queue.put(packet)
+            last_sent_action = "STOP"
+            start_command_time = None
+            with state_lock:
+                shared_state["active_current_limit"] = 0
+                shared_state["apply_with_stop"] = False
+            continue
+
+        # 2. Kézi újraindítás (Alkalmaz gomb Force módban)
+        if apply_with_restart:
+            log_message("[VEZÉRLÉS] Felhasználói árammódosítás újraindítással kérték. Töltés leállítása, újraindítás 15 mp múlva...")
+            stop_payload = bytearray(47)
+            stop_payload[0] = 0x01
+            packet = create_ble_packet(0x8008, bytes(stop_payload))
+            await ble_command_queue.put(packet)
+            last_sent_action = "STOP"
+            start_command_time = None
+            cooldown_time = current_time + 15.0
+            with state_lock:
+                shared_state["active_current_limit"] = 0
+                shared_state["cooldown_until"] = cooldown_time
+                shared_state["apply_with_restart"] = False
+                shared_state["restart_pending_start"] = True
+            continue
+
         # Ha a töltés nem aktív és nem várunk megerősítésre, engedélyezzük az új parancsokat
         if not charging_active and start_command_time is None:
             last_sent_action = None
@@ -4114,38 +4165,6 @@ async def run_charge_controller():
                 with state_lock:
                     shared_state["manual_start_requested"] = True
                 manual_start_requested = True
-
-        # --- ALKALMAZÁSI ÉS ÚJRAINDÍTÁSI FLAGEK FELDOLGOZÁSA ---
-        # 1. Kézi leállítás
-        if apply_with_stop:
-            log_message("[VEZÉRLÉS] Felhasználói árammódosítás leállítással kérték. Töltés LEÁLLÍTÁSA...")
-            stop_payload = bytearray(47)
-            stop_payload[0] = 0x01
-            packet = create_ble_packet(0x8008, bytes(stop_payload))
-            await ble_command_queue.put(packet)
-            last_sent_action = "STOP"
-            start_command_time = None
-            with state_lock:
-                shared_state["active_current_limit"] = 0
-                shared_state["apply_with_stop"] = False
-            continue
-
-        # 2. Kézi újraindítás (Alkalmaz gomb Force módban)
-        if apply_with_restart:
-            log_message("[VEZÉRLÉS] Felhasználói árammódosítás újraindítással kérték. Töltés leállítása, újraindítás 15 mp múlva...")
-            stop_payload = bytearray(47)
-            stop_payload[0] = 0x01
-            packet = create_ble_packet(0x8008, bytes(stop_payload))
-            await ble_command_queue.put(packet)
-            last_sent_action = "STOP"
-            start_command_time = None
-            cooldown_time = current_time + 15.0
-            with state_lock:
-                shared_state["active_current_limit"] = 0
-                shared_state["cooldown_until"] = cooldown_time
-                shared_state["apply_with_restart"] = False
-                shared_state["restart_pending_start"] = True
-            continue
 
         # 3. Mentés újraindítás nélkül (reset_limit)
         if reset_limit:
@@ -4654,7 +4673,8 @@ def console_simulation_input():
 
 # --- FŐ PROGRAM BELÉPÉSI PONT ---
 async def main():
-    global shared_state, ble_command_queue
+    global shared_state, ble_command_queue, main_loop
+    main_loop = asyncio.get_running_loop()
     
     print("=== Deye & BESEN Integrált Telemetria és Töltésvezérlő ===")
     

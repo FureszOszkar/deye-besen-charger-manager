@@ -122,7 +122,9 @@ The software features multiple safety mechanisms to protect the hardware, the el
 4.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
     *   Deye inverter synchronous Modbus requests (`pysolarmanv5`) run on a separate background worker thread, ensuring network interruptions do not freeze the main event loop.
     *   All Bluetooth write and notification requests are constrained by a strict 5-second timeout limit.
+    *   **Connection Timeout Protection:** `BleakClient` connection attempts (`client.connect()`) can occasionally hang indefinitely within the Windows Bluetooth stack. To mitigate this, connection attempts are wrapped in an explicit 20-second async timeout (`asyncio.wait_for`). If connection takes longer, it is aborted, the socket is cleaned up, and a fresh reconnection cycle is started.
     *   If the connection state is `LOGGED_IN` but no telemetry packets arrive from the charger for 15 seconds, the built-in watchdog logs a timeout, closes the dead connection, and cleanly restarts the BLE discovery and reconnection process.
+    *   **Thread-Safe Telemetry Processing:** Notifications arriving from Bleak's background worker thread are dispatched back to the main event loop thread using `asyncio.run_coroutine_threadsafe` via the global `main_loop` reference, preventing thread-level `RuntimeError: no running event loop` exceptions.
 
 
 ---

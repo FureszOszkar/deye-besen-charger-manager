@@ -66,7 +66,9 @@ Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladato
 * **Feladat:** A BESEN BS20 autótöltő Bluetooth BLE kapcsolatának kezelése, a küldési sorban (`ble_command_queue`) lévő parancsok kiküldése és a beérkező adatok fogadása.
 * **Használt könyvtár:** `bleak`.
 * **Időkorlátok és Biztonsági Wrapperek:** A Bluetooth írási és feliratkozási műveletek nem tartalmaznak beépített időkorlát-kezelést a Bleak-ben. Ennek kiküszöbölésére a parancsokat és feliratkozásokat a `safe_ble_write()` és `safe_ble_start_notify()` wrappers függvényeken keresztül hajtjuk végre, amelyek 5 másodperces `asyncio.wait_for` időkorlátot alkalmaznak. Sikertelen vagy túlnyúló művelet esetén a kapcsolat automatikusan bontásra kerül a tiszta újracsatlakozás érdekében.
+* **Bluetooth Kapcsolódási Időkorlát:** A `BleakClient` kapcsolatfelépítés Windows alatt hajlamos lehet végtelenül leblokkolni. Ennek elkerülésére a csatlakozást egy explicit `asyncio.wait_for(client.connect(), timeout=20.0)` hívásba zártuk, amely 20 másodperc után megszakítja az akadozó kapcsolódási kísérletet és újracsatlakozási ciklust indít.
 * **Telemetria Watchdog (Kapcsolatfigyelő):** A kliens folyamatosan frissíti a `last_rx_time` globális változót minden beérkező telemetria csomagnál. Ha a kapcsolat státusza `LOGGED_IN`, de 15 másodperce nem érkezett adatcsomag a töltőtől, a watchdog időtúllépést naplóz, megszakítja a kapcsolatot (`client.disconnect()`), és kezdeményezi a tiszta újracsatlakozási folyamatot.
+* **Szálbiztos Callback Feldolgozás (main_loop):** Mivel a Bleak a telemetria callbacket (`ble_notification_received()`) egy háttérszálon (WinRT event thread) keresztül hívja meg, az aszinkron feladatok közvetlen ütemezése (`asyncio.create_task()`) hibát dobna az eseményhurok hiánya miatt. Ennek javítására a program indításakor a főszálon elmentjük az eseményhurkot a globális `main_loop` változóba, a callbackben pedig az `asyncio.run_coroutine_threadsafe(..., main_loop)` segítségével szálbiztosan ütemezzük a csomagok feldolgozását.
 * **Kulcsfontosságú UUID-k:**
   * `FFE4` (Notify): Itt küldi a töltő folyamatosan a telemetriát (feszültségek, áramok, belső hőmérséklet, állapot).
   * `FFF3` (Write): Ide írjuk a vezérlőparancsokat (Indítás, Leállítás, Áramerősség állítás).
@@ -77,6 +79,7 @@ Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladato
 * **Feladat:** A vezérlő fő döntési ciklusa (5 másodpercenként fut le).
 * **Működés:** Beolvassa a `shared_state`-ből az inverter és a töltő pillanatnyi állapotát, kiértékeli az aktív üzemmódot (Auto, Scheduled, Force), majd ha szükséges, parancs-csomagot helyez el a `ble_command_queue` sorba.
 * **Biztonsági ellenőrzések:** Itt fut a `house_power_limit_w` túlterhelés-védelem kiértékelése is. Ha az UPS terhelés meghaladja a megadott korlátot, a ciklus leállító parancsot ad ki a töltő felé.
+* **Kézi Leállítások Feldolgozása (Soft Stop / Restart):** A manuális override flageket (`apply_with_stop`, `apply_with_restart`) a hurok legelső pontján dolgozza fel a rendszer, még az üzemmód kiértékelése és a `monitoring` mód miatti esetleges korai visszaugrás (`continue`) előtt. Ezzel biztosítjuk, hogy az Ideiglenes Leállítás (Soft Stop) gomb megnyomásakor a stop parancs azonnal kiküldésre kerüljön, még akkor is, ha nincs aktív szabályozó automatizmus a háttérben.
 
 ---
 

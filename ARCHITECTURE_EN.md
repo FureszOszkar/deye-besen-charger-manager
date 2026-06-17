@@ -66,7 +66,9 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 * **Task:** Manages the BLE connection to the BESEN BS20 car charger, processes the `ble_command_queue`, and receives notifications.
 * **Library:** `bleak`.
 * **Timeouts and Safe Wrappers:** Bluetooth write and notify registrations lack built-in timeout handling in Bleak. To prevent freezes, all interactions are performed via custom wrappers `safe_ble_write()` and `safe_ble_start_notify()`, which enforce a 5.0 second timeout limit using `asyncio.wait_for()`. Any error or timeout triggers a clean client disconnection to start the reconnection loop.
+* **Bluetooth Connection Timeout:** Establishing a connection with `BleakClient` under Windows is prone to hanging indefinitely. To prevent this, the connection process is wrapped in an explicit `asyncio.wait_for(client.connect(), timeout=20.0)` call, which terminates the blocked attempt after 20 seconds and restarts the connection cycle.
 * **Telemetry Watchdog:** The client tracks telemetry activity via a global `last_rx_time` timestamp. If the connection state is `LOGGED_IN` but no telemetry packets are received from the charger for 15 seconds, the watchdog triggers a connection reset and cleanly restarts the BLE discovery and reconnection process.
+* **Thread-Safe Callback Processing (main_loop):** Since Bleak invokes the telemetry callback (`ble_notification_received()`) on its own background thread (WinRT event thread), directly scheduling async tasks (`asyncio.create_task()`) would fail due to the absence of a running event loop in that thread. To resolve this, we store the main event loop reference in the global `main_loop` variable at startup and use `asyncio.run_coroutine_threadsafe(..., main_loop)` to safely dispatch packet processing back to the main thread's event loop.
 * **Important GATT UUIDs:**
   * `FFE4` (Notify): Where the charger streams its telemetry (voltage, current feedback, temperature, status).
   * `FFF3` (Write): Used to write commands (Start, Stop, Current limits).
@@ -77,6 +79,7 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 * **Task:** The main control loop (runs every 5 seconds).
 * **Operation:** Reads telemetry from `shared_state`, evaluates active automation rules (Auto, Scheduled, Force), and pushes packets into the `ble_command_queue` when state changes occur.
 * **Safety Guards:** Evaluates the `house_power_limit_w` threshold. If the household UPS load exceeds this limit, it pushes a stop command to the queue.
+* **Manual Override Processing (Soft Stop / Restart):** Manual override flags (`apply_with_stop`, `apply_with_restart`) are evaluated at the very beginning of the loop, before mode evaluation and any early loop skips (such as the `monitoring` mode return). This guarantees that the Soft Stop command is dispatched to the charger immediately when requested, even if no automated schedule or solar rules are currently running.
 
 ---
 

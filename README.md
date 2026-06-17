@@ -122,7 +122,9 @@ A szoftver számos beépített biztonsági funkcióval rendelkezik a hardverek, 
 4.  **Hálózati Aszinkronizáció és Telemetria Watchdog (Kapcsolat-helyreállítás):**
     *   A Deye inverter szinkron lekérdezései (`pysolarmanv5`) egy teljesen elkülönített háttérszálon futnak, így a hálózati ingadozások nem tudják blokkolni a fő eseményhurkot.
     *   Minden Bluetooth írás és feliratkozás 5 másodperces szigorú időkorlát-védelem alatt áll.
+    *   **Kapcsolódási időkorlát (Connect Timeout):** A Bleak kapcsolódási kísérlete (`client.connect()`) hajlamos lehet végtelenül leblokkolni a Windows Bluetooth rétegében. Ennek elkerülésére a kapcsolódást egy 20 másodperces aszinkron időkorlát (`asyncio.wait_for`) védi. Ha ennyi idő alatt nem jön létre a kapcsolat, a program megszakítja a kísérletet, lezárja a socketet és újracsatlakozási ciklust indít.
     *   Ha a kapcsolat állapota `LOGGED_IN`, de 15 másodpercig nem érkezik telemetriai adat a töltőtől, a program automatikusan lezárja a fagyott kapcsolatot, és újracsatlakozási folyamatot indít, biztosítva a teljesen felügyelet nélküli automatikus működést.
+    *   **Szálbiztos telemetria feldolgozás:** A Bleak háttérszáláról érkező értesítéseket a program a fő eseményhurok (`main_loop`) referenciáján keresztül, az `asyncio.run_coroutine_threadsafe` függvénnyel küldi át a főszálra, megelőzve a háttérszálakon fellépő `RuntimeError: no running event loop` hibákat.
 
 ---
 
