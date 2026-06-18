@@ -2,7 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi hálózaton (offline) futó integrált vezérlőmegoldás, amely összekapcsolja a **Deye háromfázisú hibrid invertert** és a **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja a napelemes energiatermelés és a háztartási akkumulátor állapotának figyelembevételével az elektromos autó töltésének teljesen automata, intelligens és biztonságos vezérlése.
-<img width="1900" height="893" alt="kép" src="https://github.com/user-attachments/assets/058b4873-df6e-4b2a-a5b9-c691436ab62d" />
 
 ---
 
@@ -75,6 +74,10 @@ A kezelőfelület teljes körű mobil-optimalizálást kapott (`1024px` képerny
 *   **Tapadós (Sticky) Mobil Státusz Sáv:** A képernyő tetején rögzített státusz sáv valós idejű LED-szerű visszajelzőkkel mutatja a kapcsolatok (Deye, BESEN) és az aktív üzemmódok (Auto, Ütemezett) állapotát.
 *   **Mobil-optimalizált Naptár és Űrlapok:** Az ütemezési sorok 3 szintes blokkokká alakulnak (külön sorba kerül a csúszka és a felülbírálási opció), így ujjheggyel is könnyen kezelhetővé válnak. Minden egyéb beviteli mező 1 oszlopos elrendezésbe rendeződik át.
 *   **Cache-Control védelem:** A HTTP szerver automatikus no-cache fejlécekkel küldi el a lapot, így a mobil böngészők nem tudják a régi elrendezéseket gyorsítótárazni (cache-elni).
+
+### C) Élő Töltési Teljesítmény és Energia Korrekció
+*   **Töltési teljesítmény panel:** A fázis táblázat mellett elhelyezett önálló, kompakt kijelző valós időben mutatja az autóba táplált összesített elektromos teljesítményt kilowattban (kW), amelyet a fázis feszültségek és áramok szorzatainak összegeként számol ki a kliensoldali felület: `(V1*I1 + V2*I2 + V3*I3) / 1000`. Tétlen állapotban a kijelző `0.00 kW` értéket mutat.
+*   **Töltési energia összesen:** A BESEN töltő gyári telemetria regisztere fázisonként (az L1 fázisra) számolja az átvitt energiát. 3-fázisú töltés esetén (amikor áram folyik az L2 vagy L3 fázison is) a szoftver automatikusan 3-as szorzót alkalmaz a telemetria értékre, hogy a műszerfalon a tényleges, valós betöltött energia (kWh) jelenjen meg.
 
 ---
 

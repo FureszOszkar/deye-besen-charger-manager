@@ -125,6 +125,20 @@ Minden küldött és fogadott csomag egy rögzített struktúrájú bináris tö
 | **N+1 - N+2** | 2 bájt | Ellenőrzőösszeg (CRC16/Modbus) | A 0. bájttól a hasznos teher végéig számítva |
 | **N+3 - N+4** | 2 bájt | Záró bájtok (Tail) | `0x0F, 0x02` |
 
+### C) Telemetria csomagok (0x0004 és 0x000D) hasznos terhének felépítése (Payload Structure)
+A telemetria és állapot jelentések hasznos terhe (`payload = packet[21:]`) tartalmazza az élő méréseket:
+*   `payload[1:3]`: L1 feszültség (szorzó: 0.1, V)
+*   `payload[3:5]`: L1 áramerősség (szorzó: 0.01, A)
+*   `payload[5:9]`: Pillanatnyi aktív teljesítmény (Big-Endian, W)
+*   `payload[9:13]`: L1 töltési energia regiszter (Big-Endian, szorzó: 0.01, Wh). *Megjegyzés: 3-fázisú töltésnél a szoftver ezt felszorozza 3-mal a valós összesített értékhez.*
+*   `payload[13:15]`: Belső hőmérséklet (szorzó: 0.01, offset: -200 °C)
+*   `payload[18]`: Csatlakozó kábel állapota (Plug State)
+*   `payload[19]`: Töltési kimenet állapota (Output State)
+*   `payload[25:27]`: L2 feszültség (szorzó: 0.1, V)
+*   `payload[27:29]`: L2 áramerősség (szorzó: 0.01, A)
+*   `payload[29:31]`: L3 feszültség (szorzó: 0.1, V)
+*   `payload[31:33]`: L3 áramerősség (szorzó: 0.01, A)
+
 ---
 
 ## 4. API Végpontok és a Kezelőfelület Kapcsolata

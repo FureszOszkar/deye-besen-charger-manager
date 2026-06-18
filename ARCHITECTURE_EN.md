@@ -125,6 +125,20 @@ All sent and received packets share a fixed binary frame format:
 | **N+1 - N+2** | 2 bytes | Modbus CRC16 Checksum | Calculated from byte 0 to end of payload |
 | **N+3 - N+4** | 2 bytes | Packet Tail | `0x0F, 0x02` |
 
+### C) Telemetry Payload Structure (Command ID: 0x0004 & 0x000D)
+The telemetry payload (`payload = packet[21:]`) contains the live status measurements:
+*   `payload[1:3]`: L1 voltage (scale: 0.1, V)
+*   `payload[3:5]`: L1 current (scale: 0.01, A)
+*   `payload[5:9]`: Real-time active power (Big-Endian, W)
+*   `payload[9:13]`: L1 charging energy register (Big-Endian, scale: 0.01, Wh). *Note: On 3-phase setups, the controller multiplies this by 3.0 to obtain the total session energy.*
+*   `payload[13:15]`: Internal temperature (scale: 0.01, offset: -200 °C)
+*   `payload[18]`: Physical plug state
+*   `payload[19]`: Charging output state
+*   `payload[25:27]`: L2 voltage (scale: 0.1, V)
+*   `payload[27:29]`: L2 current (scale: 0.01, A)
+*   `payload[29:31]`: L3 voltage (scale: 0.1, V)
+*   `payload[31:33]`: L3 current (scale: 0.01, A)
+
 ---
 
 ## 4. API Endpoints and Dashboard Interaction

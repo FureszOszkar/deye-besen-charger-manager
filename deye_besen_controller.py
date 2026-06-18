@@ -1765,35 +1765,46 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
 
             <div>
-                <table class="phase-table">
-                    <thead>
-                        <tr>
-                            <th>Fázis</th>
-                            <th>Feszültség</th>
-                            <th>
-                                Mért töltőáram (Visszacsatolás)
-                                <span class="tooltip-container">ⓘ<span class="tooltip-text">A töltőkábelen (fázisonként) ténylegesen átfolyó áramerősség élő visszacsatolása az autótöltőtől.</span></span>
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>L1</td>
-                            <td id="v1">0.0 V</td>
-                            <td id="i1" style="color: var(--primary);">0.00 A</td>
-                        </tr>
-                        <tr>
-                            <td>L2</td>
-                            <td id="v2">0.0 V</td>
-                            <td id="i2" style="color: var(--primary);">0.00 A</td>
-                        </tr>
-                        <tr>
-                            <td>L3</td>
-                            <td id="v3">0.0 V</td>
-                            <td id="i3" style="color: var(--primary);">0.00 A</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: stretch; margin-bottom: 0.8rem;">
+                    <div style="flex: 1.5; min-width: 280px; max-width: 450px;">
+                        <table class="phase-table" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Fázis</th>
+                                    <th>Feszültség</th>
+                                    <th>
+                                        Mért töltőáram (Visszacsatolás)
+                                        <span class="tooltip-container">ⓘ<span class="tooltip-text">A töltőkábelen (fázisonként) ténylegesen átfolyó áramerősség élő visszacsatolása az autótöltőtől.</span></span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>L1</td>
+                                    <td id="v1">0.0 V</td>
+                                    <td id="i1" style="color: var(--primary);">0.00 A</td>
+                                </tr>
+                                <tr>
+                                    <td>L2</td>
+                                    <td id="v2">0.0 V</td>
+                                    <td id="i2" style="color: var(--primary);">0.00 A</td>
+                                </tr>
+                                <tr>
+                                    <td>L3</td>
+                                    <td id="v3">0.0 V</td>
+                                    <td id="i3" style="color: var(--primary);">0.00 A</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="flex: 1; min-width: 200px; max-width: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; box-sizing: border-box;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; text-align: center;">
+                            Töltési teljesítmény
+                            <span class="tooltip-container">ⓘ<span class="tooltip-text">A három fázis pillanatnyi teljesítményének összege kilowattban (kW).</span></span>
+                        </div>
+                        <div id="charging-power-val" style="font-size: 2.2rem; font-weight: 700; color: var(--primary);">0.00 kW</div>
+                    </div>
+                </div>
                 <div style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted);">
                     <div style="display: flex; justify-content: space-between;">
                         <div>
@@ -2489,6 +2500,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (plugStatusInline) {
                     plugStatusInline.innerText = plugText;
                     plugStatusInline.style.color = plugColor;
+                }
+
+                // Pillanatnyi töltési teljesítmény számítása
+                const p1 = data.voltages[0] * data.currents[0];
+                const p2 = data.voltages[1] * data.currents[1];
+                const p3 = data.voltages[2] * data.currents[2];
+                const totalPowerKW = (p1 + p2 + p3) / 1000.0;
+
+                const powerEl = document.getElementById('charging-power-val');
+                if (powerEl) {
+                    powerEl.innerText = totalPowerKW.toFixed(2) + ' kW';
                 }
 
                 // Fázis adatok
@@ -3529,16 +3551,18 @@ async def process_assembled_packet(packet, client):
             v1 = ((payload[1] << 8) | payload[2]) * 0.1
             i1 = ((payload[3] << 8) | payload[4]) * 0.01
             
-            energy_raw = (payload[9] << 24) | (payload[10] << 16) | (payload[11] << 8) | payload[12]
-            energy_kwh = energy_raw * 0.01 / 1000.0
-            
-            t_val = (payload[13] << 8) | payload[14]
-            temp_int = (t_val - 20000) * 0.01 if t_val != 0xFFFF else -1.0
-            
             v2 = ((payload[25] << 8) | payload[26]) * 0.1
             i2 = ((payload[27] << 8) | payload[28]) * 0.01
             v3 = ((payload[29] << 8) | payload[30]) * 0.1
             i3 = ((payload[31] << 8) | payload[32]) * 0.01
+            
+            energy_raw = (payload[9] << 24) | (payload[10] << 16) | (payload[11] << 8) | payload[12]
+            # A BESEN telemetria az L1 fázis energiáját méri. 3-fázisú töltésnél (L2 vagy L3 aktív) 3-as szorzó szükséges.
+            phase_multiplier = 3.0 if (i2 > 0.5 or i3 > 0.5) else 1.0
+            energy_kwh = (energy_raw * 0.01 / 1000.0) * phase_multiplier
+            
+            t_val = (payload[13] << 8) | payload[14]
+            temp_int = (t_val - 20000) * 0.01 if t_val != 0xFFFF else -1.0
             
             output_state = payload[19]
             plug_state = payload[18]
@@ -3850,33 +3874,36 @@ async def safe_ble_start_notify(client, char, callback, timeout=5.0):
 def fetch_inverter_data_blocking():
     # Solarman V5 alapú lekérdezés megnyitása a logger sticks felé
     inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
-    
-    # Belső hálózati teljesítmény (Register 607) - Signed Short
-    grid_power_internal = to_signed_16(inverter.read_holding_registers(register_addr=607, quantity=1)[0])
-    # Külső hálózati teljesítmény (Register 619) - Signed Short
-    grid_power_external = to_signed_16(inverter.read_holding_registers(register_addr=619, quantity=1)[0])
-    # Házi Akkumulátor SoC (Register 588) - Unsigned Short
-    battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
-    # UPS terhelés / ház fogyasztás (Register 643) - Unsigned Short
-    ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
-    # Napelem termelés (Register 175) - Unsigned Short
-    pv_power = inverter.read_holding_registers(register_addr=175, quantity=1)[0]
-    # Akkumulátor terhelés (Register 590) - Signed Short
-    battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
-    
-    # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
-    charger_power = max(0, grid_power_external - grid_power_internal)
-    
-    inverter.disconnect()
-    
-    return {
-        "grid_power": grid_power_external,
-        "battery_soc": battery_soc,
-        "ups_load_power": ups_load_power,
-        "pv_power": pv_power,
-        "battery_power": battery_power,
-        "charger_power": charger_power
-    }
+    try:
+        # Belső hálózati teljesítmény (Register 607) - Signed Short
+        grid_power_internal = to_signed_16(inverter.read_holding_registers(register_addr=607, quantity=1)[0])
+        # Külső hálózati teljesítmény (Register 619) - Signed Short
+        grid_power_external = to_signed_16(inverter.read_holding_registers(register_addr=619, quantity=1)[0])
+        # Házi Akkumulátor SoC (Register 588) - Unsigned Short
+        battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
+        # UPS terhelés / ház fogyasztás (Register 643) - Unsigned Short
+        ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
+        # Napelem termelés (Register 175) - Unsigned Short
+        pv_power = inverter.read_holding_registers(register_addr=175, quantity=1)[0]
+        # Akkumulátor terhelés (Register 590) - Signed Short
+        battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
+        
+        # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
+        charger_power = max(0, grid_power_external - grid_power_internal)
+        
+        return {
+            "grid_power": grid_power_external,
+            "battery_soc": battery_soc,
+            "ups_load_power": ups_load_power,
+            "pv_power": pv_power,
+            "battery_power": battery_power,
+            "charger_power": charger_power
+        }
+    finally:
+        try:
+            inverter.disconnect()
+        except Exception:
+            pass
 
 # Aszinkron Inverter adatlekérdezés task (átdolgozva háttérszálon futó blocking hívásokkal)
 async def run_inverter_polling():

@@ -75,6 +75,10 @@ The interface is fully optimized for mobile screens (activated below `1024px` wi
 *   **Touch-Friendly Scheduled Calendar:** The weekly schedule table collapses into a 3-level layout per day (times, sliders, and overrides are separated), making it easy to drag sliders and check options on touchscreens. Inputs collapse into a single-column layout.
 *   **Cache-Control Protection:** The HTTP server sends `Cache-Control` headers, forcing mobile browsers to always load the latest design, preventing interface updates from being cached.
 
+### C) Live Charging Power and Energy Correction
+*   **Charging Power Panel:** A dedicated, compact panel next to the phase table displays the live total power delivered to the car in kilowatts (kW). It is calculated on the client-side as `(V1*I1 + V2*I2 + V3*I3) / 1000`. When charging is inactive, it naturally reads `0.00 kW`.
+*   **Total Charging Energy:** The BESEN charger's raw telemetry registers only track energy accumulation for the primary phase (L1). In 3-phase charging mode (detected when current flows on L2 or L3), the controller automatically applies a 3.0x multiplier to the telemetry value so that the actual total energy delivered to the battery (kWh) is displayed on the dashboard.
+
 ---
 
 ## 5. Operating Modes
