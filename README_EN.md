@@ -24,6 +24,8 @@ The stability of both Bluetooth Low Energy (BLE) and the local Wi-Fi network is 
 ### A) High-Gain USB Bluetooth (BT) Antenna / Adapter
 The default Bluetooth chip in the BESEN charger has a limited range. The computer running the controller software **must be equipped with an external USB Bluetooth 5.0 (or newer) adapter with a high-gain antenna** (the system has been successfully tested and runs using the **Mercusys MA550H Long Range Bluetooth 5.4** adapter). Built-in motherboard Bluetooth chips or tiny USB dongles are not capable of maintaining a stable connection with a car charger placed outside the building.
 
+- **Note on Timestamps:** The BESEN charger MCU checks the Unix timestamp in the START command for time synchronization. If there is a significant difference (e.g., Budapest vs. Shanghai), it may reject the package. To address this, the `get_shanghai_timestamp()` function converts the local time to a Unix timestamp with an 8-hour offset (Shanghai timezone). This adjusted timestamp is used in the START commands.
+
 ### Alternative Solution: Micro-computer (e.g. Raspberry Pi) near the charger
 If the main computer running the controller is too far, a highly effective alternative to an expensive long-range antenna is placing a cheap, Wi-Fi and Bluetooth-enabled micro-computer (e.g., **Raspberry Pi Zero 2 W, Raspberry Pi 3, 4, or 5**) close to the charger (e.g., inside the garage).
 Since the software requires minimal resources, the entire controller can be run directly on this local device. In this setup, the micro-computer communicates with the charger via a stable, short-range Bluetooth connection, while accessing the inverter and the local network via the household Wi-Fi.
@@ -72,8 +74,11 @@ The interface is fully optimized for mobile screens (activated below `1024px` wi
 *   **Hamburger Menu & Glassmorphic Overlay:** On mobile, the traditional desktop tab buttons are hidden. Instead, a clean hamburger icon (☰) in the header opens a beautiful, glassmorphic full-screen navigation overlay.
 *   **Single-Card Section Layout:** To eliminate endless scrolling, only one active configuration card or telemetry panel is visible at a time.
 *   **Sticky Status Bar:** A thin header bar sticks to the top of the mobile screen. It provides real-time LED-like indicator dots showing the connection status (Deye, BESEN) and the active modes (Solar Auto, Scheduled).
-*   **Touch-Friendly Scheduled Calendar:** The weekly schedule table collapses into a 3-level layout per day (times, sliders, and overrides are separated), making it easy to drag sliders and check options on touchscreens. Inputs collapse into a single-column layout.
+*   **Touch-Friendly Scheduled Calendar & Forms:** The weekly schedule table collapses into a 3-level layout per day (times, sliders, and overrides are separated), making it easy to drag sliders and check options on touchscreens. All other input fields stack into a single column.
+*   **Start & Stop SoC in a Single Row with Color Feedback:** The start (`auto_start_soc`) and stop (`auto_stop_soc`) battery levels are placed side-by-side in a single row. Optional parameters (such as `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`) turn gray (`.input-inactive`) when set to 0 (disabled), and light up in blue (`.input-active`) when active (> 0).
+*   **Clickable Sliders with Dynamic Background Fill:** The current limit range sliders respond to direct clicks or taps along their tracks. The background fill adjusts dynamically (using linear-gradient) to visually reflect the selected current level.
 *   **Cache-Control Protection:** The HTTP server sends `Cache-Control` headers, forcing mobile browsers to always load the latest design, preventing interface updates from being cached.
+*   **Tooltip Layout and Event Handling:** On mobile, tooltips display downwards below the info icons (preventing overlap with the sticky header), are restricted to `220px` in width, and align to the left on right-side components to avoid screen overflow. A global client-side event listener blocks click propagation on `.tooltip-container` elements, preventing accidental toggle changes on parent checkboxes.
 
 ### C) Live Charging Power and Energy Correction
 *   **Charging Power Panel:** A dedicated, compact panel next to the phase table displays the live total power delivered to the car in kilowatts (kW). It is calculated on the client-side as `(V1*I1 + V2*I2 + V3*I3) / 1000`. When charging is inactive, it naturally reads `0.00 kW`.
@@ -87,12 +92,13 @@ The controller offers three main operating modes, which you can select at the to
 
 ### 1. Auto (Solar Auto) Mode
 An intelligent mode designed to maximize the utilization of solar excess.
-*   **Napelemes mód bekapcsolása (Enable Solar Auto):** Toggle to activate the solar excess logic.
-*   **Maximális töltőáram (Max Charger Current, 6-16A):** Sets the maximum charging speed. If the "Disable software current regulation" checkbox is ticked, the vehicle will charge at its own physical maximum speed (or the charger's physical limit).
-*   **Indítási akku szint (Start Battery SoC %):** The minimum home battery level below which charging cannot start (recommended: `100%`).
-*   **Hálózati fogyasztás küszöbérték (Grid Consumption Limit, W):** The grid import threshold (e.g., `2000 W`) above which the delayed shutdown timer begins.
-*   **Hálózati töltés késleltetett leállítása (Delayed Shutdown, minutes):** Helps bridge passing clouds. The system allows grid import for this many minutes before stopping (if set to `0`, it stops immediately).
-*   **Ház UPS túlterhelés-védelem (UPS Power Limit, W):** If the load on the UPS port exceeds this value, charging stops instantly (recommended: `3000 W` - `5000 W`, depending on inverter and breaker ratings).
+*   **Enable Solar Auto:** Toggle to activate the solar excess regulation.
+*   **Max Charger Current (6-16A):** Sets the maximum charging speed. If the "Disable software current regulation" checkbox is ticked, the vehicle will charge at its own physical maximum speed (or the charger's physical limit).
+*   **Start Battery SoC (%):** The minimum home battery level below which charging cannot start (recommended: `100%`).
+*   **Stop Battery SoC (%):** The minimum home battery level (e.g., `20%`) below which charging stops immediately to protect the home battery from deep discharge (if `0`, the rule is inactive).
+*   **Grid Consumption Limit (W):** The network import limit (e.g., `2000 W`) above which the delayed grid charging shutdown initiates.
+*   **Delayed Shutdown (minutes):** Used to bridge passing clouds. The program allows grid import for this many minutes before stopping (if `0`, it stops immediately).
+*   **House UPS Overload Protection (W):** If the load on the UPS output exceeds this value, charging stops instantly to prevent household blackout (recommended: `3000 W` - `5000 W`, depending on inverter and breaker ratings).
 
 ### 2. Scheduled (Calendar) Mode
 Time-based charging control with weekly scheduling.
@@ -103,6 +109,8 @@ Time-based charging control with weekly scheduling.
     *   Start and Stop times (HH:MM).
     *   Current limit (6-16A).
     *   **Solar Auto felülírása (Override Solar Auto):** If checked, solar and battery shutdown rules are ignored during this window (guaranteed night/timed charging).
+
+*   **Charge Record Processing (`0x000A` packet):** The `0x000A` (decimal 10) packet represents a historical charge record sent by the EVSE. The program processes this packet to extract the initiating RFID card UID (bytes 1-16), the stop reason (bytes 17-32, e.g., `"Pull Plug"`), the date-based session ID (bytes 33-48), start/end Unix timestamps, session duration, and starting, ending, and total charged energy values in Wh. Safely processing this packet prevents false charging shutdowns (previously, the first bytes of the unhandled packet were misread as a status change, causing incorrect stops).
 
 ### 3. Force (Manual Override) Mode
 For immediate manual intervention and testing.
@@ -148,6 +156,8 @@ python deye_besen_controller.py --sim
 ```
 *Note: Place any image named `background.png` in the directory next to the file to test the background display.*
 
+- **Slider Background Fill Fix:** The slider backgrounds on the dashboard now correctly reflect the configured current values upon loading. Previously, high current sliders appeared half-filled (50%) by default until interacted with. This issue was resolved by adjusting the JavaScript initialization sequence to apply the correct background fill after the configuration values are loaded into the DOM.
+
 ### C) Running in Production Mode
 Run the script without parameters:
 ```bash
@@ -176,7 +186,9 @@ Upon startup, the program reads the `config.json` file. If it does not exist, it
 | `charger_name` | string | Bluetooth name of the BESEN BS20 car charger. | `"ACP#DefaultName"` |
 | `charger_mac` | string | Bluetooth MAC address of the BESEN BS20 car charger. | `"00:11:22:33:44:55"` |
 | `charger_password` | string | Charger authorization password (6-byte PIN or 12-character hex key). | `"YOURPIN"` |
+| `charger_username` | string | (Hardcoded) Charger login username (modified to `"BDmanager"` for privacy). | `"BDmanager"` |
 | `start_soc` | integer | Home battery SoC % threshold above which car charging is allowed to start. | `100` |
+| `stop_soc` | integer | Home battery SoC % threshold below which car charging stops (0 to disable). | `0` |
 | `stop_import_limit` | integer | Maximum allowed grid import power (W) before starting delayed shutdown. | `2000` |
 | `grid_charge_duration_minutes` | integer | Delayed shutdown grace period (minutes) for cloud cover. If `0`, stops immediately. | `30` |
 | `house_power_limit_w` | integer | House UPS overload protection limit (W). Recommended for 5 kW inverter: `4000`. | `4000` |

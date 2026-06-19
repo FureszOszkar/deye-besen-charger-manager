@@ -69,6 +69,7 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 * **Bluetooth Connection Timeout:** Establishing a connection with `BleakClient` under Windows is prone to hanging indefinitely. To prevent this, the connection process is wrapped in an explicit `asyncio.wait_for(client.connect(), timeout=20.0)` call, which terminates the blocked attempt after 20 seconds and restarts the connection cycle.
 * **Telemetry Watchdog:** The client tracks telemetry activity via a global `last_rx_time` timestamp. If the connection state is `LOGGED_IN` but no telemetry packets are received from the charger for 15 seconds, the watchdog triggers a connection reset and cleanly restarts the BLE discovery and reconnection process.
 * **Thread-Safe Callback Processing (main_loop):** Since Bleak invokes the telemetry callback (`ble_notification_received()`) on its own background thread (WinRT event thread), directly scheduling async tasks (`asyncio.create_task()`) would fail due to the absence of a running event loop in that thread. To resolve this, we store the main event loop reference in the global `main_loop` variable at startup and use `asyncio.run_coroutine_threadsafe(..., main_loop)` to safely dispatch packet processing back to the main thread's event loop.
+* **Thread-Safe BLE Queue Clearing (`clear_ble_command_queue`):** To prevent command accumulation during offline periods and avoid sudden bursts of commands upon reconnection, the system implements a thread-safe `clear_ble_command_queue()` function that clears any leftover items in the `ble_command_queue` whenever a disconnection or reconnection occurs.
 * **Important GATT UUIDs:**
   * `FFE4` (Notify): Where the charger streams its telemetry (voltage, current feedback, temperature, status).
   * `FFF3` (Write): Used to write commands (Start, Stop, Current limits).
@@ -78,14 +79,22 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 ### 3. `run_charge_controller()`
 * **Task:** The main control loop (runs every 5 seconds).
 * **Operation:** Reads telemetry from `shared_state`, evaluates active automation rules (Auto, Scheduled, Force), and pushes packets into the `ble_command_queue` when state changes occur.
-* **Safety Guards:** Evaluates the `house_power_limit_w` threshold. If the household UPS load exceeds this limit, it pushes a stop command to the queue.
-* **Manual Override Processing (Soft Stop / Restart):** Manual override flags (`apply_with_stop`, `apply_with_restart`) are evaluated at the very beginning of the loop, before mode evaluation and any early loop skips (such as the `monitoring` mode return). This guarantees that the Soft Stop command is dispatched to the charger immediately when requested, even if no automated schedule or solar rules are currently running.
+* **Unified Solar Auto Rules:** The solar charging logic runs inside a single, unified decision block in the control loop. Charging starts based on the battery start threshold (`battery_soc >= start_soc`), and charging stops are governed by evaluating the following 3 protection rules in sequence:
+  1. *House Overload Protection:* If the UPS load exceeds the `house_power_limit_w` threshold, charging stops immediately.
+  2. *Battery Discharge Protection:* If `stop_soc` > 0 and the home battery SoC drops below the `stop_soc` limit, charging stops immediately.
+  3. *Grid Import Limit:* If grid import exceeds the `stop_import_limit`, a delayed timer starts, and once it reaches `grid_charge_duration_minutes` minutes, charging stops.
+* **Manual Override Handling (Soft Stop / Restart):** Process manual overrides (`apply_with_stop`, `apply_with_restart`) at the very beginning of the loop, before mode evaluation or the early `continue` in `monitoring` mode. This guarantees that clicking "Soft Stop" stops charging immediately, even without active automation rules.
+* **Manual Start Race Condition Fix:** By implementing the `manual_start_requested` state flag to guard the BLE transmission, the system prevents the startup sequence from being prematurely reset to `schedule` mode by the loop's cleanup checks before the START command packet is successfully sent via BLE.
 
 ---
 
 ## 3. BESEN BLE Protocol and Login Handshake
 
 The BESEN BS20 uses a custom, proprietary binary framing protocol over BLE. The following authorization handshake must execute successfully before the charger accepts commands:
+
+**Shanghai Timezone Timestamp:**
+The BESEN EVSE MCU checks the received Unix timestamp in the START command. If the difference is too large (e.g., Budapest vs. Shanghai), it rejects the packet.
+To address this, we introduced the `get_shanghai_timestamp()` function, which converts the local time to a Unix timestamp with an 8-hour offset (Shanghai timezone). We use this adjusted timestamp for START commands instead of `ts = int(time.time())`.
 
 ### A) Login Handshake Sequence
 
@@ -113,6 +122,21 @@ The BESEN BS20 uses a custom, proprietary binary framing protocol over BLE. The 
 ### B) Binary Packet Structure (Frame format)
 All sent and received packets share a fixed binary frame format:
 
+**Dynamic Line ID (Phase Detection):**
+The first byte of the command payload is the line identifier (`line_id`), which must be `0x01` for single-phase charging and `0x02` for three-phase charging. The system determines this dynamically based on the measured L2 and L3 phase voltages from the inverter. If active 3-phase voltages are detected (>50V), `line_id` is set to `2` (`0x02`), otherwise it defaults to `1` (`0x01`).
+
+**START Command Payload Structure:**
+The payload (`payload = packet[21:]`) for the charger start command (START, `0x8007`) follows this specific binary layout:
+*   `payload[0]`: Phase count identifier (`line_id`).
+*   `payload[1:17]`: Username (modified to `"BDmanager"`, ASCII-encoded, padded with 0x00 bytes).
+*   `payload[17:33]`: Dynamic session charging ID (format: `YYYYMMDDHHMM1337`).
+*   `payload[33]`: Default startup flag (`0x00`).
+*   `payload[34:38]`: Shanghai timezone Unix timestamp (4-byte integer, Big-Endian format).
+*   `payload[38]`: Auto-start flag (`0x01`).
+*   `payload[39]`: Online mode indicator (`0x01`).
+*   `payload[40:46]`: Limit bypass control bytes (`0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF`).
+*   `payload[46]`: Maximum charging current limit (`charger_max_amps`).
+
 | Byte Offset | Length | Description | Value / Example |
 |---|---|---|---|
 | **0 - 1** | 2 bytes | Packet Header | `0x06, 0x01` |
@@ -128,6 +152,24 @@ All sent and received packets share a fixed binary frame format:
 ### C) Telemetry Payload Structure (Command ID: 0x0004 & 0x000D)
 The telemetry payload (`payload = packet[21:]`) contains the live status measurements:
 *   `payload[1:3]`: L1 voltage (scale: 0.1, V)
+
+**Charge Record Processing (`0x000A` packet):**
+At the end of a session (or upon reconnection), the charger transmits the `0x000A` (decimal 10) command packet, which contains historical session records. The software parses and logs these details.
+The exact binary layout of the payload (`payload = packet[21:]`) is as follows:
+*   `payload[0]`: Phase/line identifier (`line_id`).
+*   `payload[1:17]`: Initiating user RFID card UID (ASCII string, e.g., `"62316176FDFFCBD8"`).
+*   `payload[17:33]`: Stop reason / stopping user (ASCII string, e.g., `"Pull Plug"`).
+*   `payload[33:49]`: Date-based session identifier (ASCII string, e.g., `"2026061017388996"`).
+*   `payload[64:68]`: Starting Unix timestamp (4-byte Big-Endian uint32).
+*   `payload[68:72]`: Ending Unix timestamp (4-byte Big-Endian uint32).
+*   `payload[72:76]`: Charging duration in seconds (4-byte Big-Endian uint32).
+*   `payload[76:80]`: Starting energy register reading in Wh (4-byte Big-Endian uint32).
+*   `payload[80:84]`: Charged energy during session in Wh (4-byte Big-Endian uint32).
+*   `payload[84:88]`: Ending energy register reading in Wh (4-byte Big-Endian uint32).
+*   `payload[95:97]`: Number of power log entries (2-byte Big-Endian uint16).
+*   `payload[97:]`: Time-series power log array (each entry is a 2-byte Big-Endian integer in Watts, e.g., `0x0FC8` = 4040 W).
+
+Safely processing this packet prevents false shutdowns. Previously, the first bytes of the unhandled packet were misread as a charging status change (since the RFID string characters did not match the expected status value), causing unexpected stops.
 *   `payload[3:5]`: L1 current (scale: 0.01, A)
 *   `payload[5:9]`: Real-time active power (Big-Endian, W)
 *   `payload[9:13]`: L1 charging energy register (Big-Endian, scale: 0.01, Wh). *Note: On 3-phase setups, the controller multiplies this by 3.0 to obtain the total session energy.*
@@ -148,11 +190,17 @@ The built-in HTTP server hosts the static Web Dashboard and provides JSON APIs f
 ### Local Network Access Protection (Authentication)
 If `"web_auth_enabled"` is active in the configuration, the server validates the `session` token in the HTTP `Cookie` header for each incoming request.
 * **Unauthorized Access**: If a request lacks a valid session token, requesting `/` returns the glassmorphic login interface (`LOGIN_HTML`), while other API endpoints (e.g., `/api/status`, `/api/config`) return a `401 Unauthorized` HTTP error with a `{"status": "unauthorized", "message": "Autentikáció szükséges!"}` JSON payload.
+
+**Privacy / Name change:**
+For security and privacy reasons, all previous username entries of "Attila" have been replaced with "BDmanager" in authentication and commands (e.g., `start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")`). This matches the default setting in the slespersen/evseMQTT project.
 * **Exception**: Fetching `/background.png` is allowed without authentication so that the login screen background can load properly.
 
 ### Responsiveness and Mobile Navigation (Client-Side)
 The Web Dashboard uses responsive CSS design with a breakpoint at `1024px`. Above this width, it displays a side-by-side desktop layout; below it, it transitions to a single-card mobile layout.
 *   **Mobile View Manager (`showSection`):** Mobile section switching is managed purely via client-side JavaScript. Clicking items in the mobile overlay menu calls `showSection(sectionId)`, which hides other main container cards and displays only the active container at full screen width, preventing layout stretching.
+
+**Slider background fill fix:**
+On dashboard load, high current sliders had a blue background defaulting to 50% (half-filled), regardless of the configured real current value (e.g., 6A), until the user clicked. We fixed this by changing the JS initialization order: we run `document.querySelectorAll('input[type="range"]').forEach(updateSliderBackground);` after loading configuration values into the DOM, so sliders appear with the correct background fill based on the actual configured value.
 *   **Cache-Control Headers**: To prevent layout rendering anomalies due to browser caching, the `/` web endpoint returns explicit HTTP caching headers set to `no-cache`, `no-store`, and `must-revalidate`.
 *   **Tooltip Layout and Event Handling:** On mobile, tooltips display downwards below the info icons (preventing overlap with the sticky header), are restricted to `220px` in width, and align to the right on right-side components to avoid screen overflow. A global client-side event listener blocks click propagation on `.tooltip-container` elements, preventing accidental toggle changes on parent checkboxes.
 

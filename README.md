@@ -2,7 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi hálózaton (offline) futó integrált vezérlőmegoldás, amely összekapcsolja a **Deye háromfázisú hibrid invertert** és a **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja a napelemes energiatermelés és a háztartási akkumulátor állapotának figyelembevételével az elektromos autó töltésének teljesen automata, intelligens és biztonságos vezérlése.
-<img width="1900" height="893" alt="kép" src="https://github.com/user-attachments/assets/d8dc312c-390c-4a39-86e5-20a1e2e4e1cb" />
 
 ---
 
@@ -11,9 +10,9 @@ Ez a szoftver egy helyi hálózaton (offline) futó integrált vezérlőmegoldá
 A szoftver az alábbi konkrét hardveres környezetben lett kifejlesztve és tesztelve:
 
 *   **Hibrid Inverter:** **Deye 5 kW-os hibrid inverter** (pl. SUN-5K-SG széria, 5 kW maximális névleges teljesítménnyel)
-    *   **Kommunikációs interfész:** Solarman LSW-3 Wi-Fi Logger (Modbus RTU over TCP protokollal a `8899`-es porton).
+*   **Kommunikációs interfész:** Solarman LSW-3 Wi-Fi Logger (Modbus RTU over TCP protokollal a `8899`-es porton).
 *   **Autótöltő (EVSE):** **BESEN BS20-APP-3P16A** (3-fázisú, maximum 16A / 11 kW teljesítményű okos autótöltő)
-    *   **Kommunikációs interfész:** Bluetooth Low Energy (BLE) kapcsolat.
+*   **Kommunikációs interfész:** Bluetooth Low Energy (BLE) kapcsolat.
 *   **Háztartási Akkumulátor:** Inverterhez kapcsolt alacsony feszültségű (48V) Lithium Iron Phosphate (LiFePO4 / LFP) akkumulátorpakk (pl. 20-30 kWh kapacitással).
 
 ---
@@ -24,6 +23,8 @@ A Bluetooth Low Energy (BLE) és a helyi Wi-Fi hálózat stabilitása kritikus f
 
 ### A) Erősített USB Bluetooth (BT) Antenna / Adapter
 A BESEN töltő gyári Bluetooth chipje korlátozott hatótávolsággal rendelkezik. A vezérlőszoftvert futtató számítógépbe **kötelező egy külső, nyereséges antennával (High-Gain Antenna) ellátott USB Bluetooth 5.0 (vagy újabb) adaptert** csatlakoztatni (a rendszer sikeresen tesztelve és üzemel a **Mercusys MA550H Long Range Bluetooth 5.4** adapterrel). A beépített alaplapi BT chipek vagy a kisméretű (dongle) vevők nem képesek stabil kapcsolatot fenntartani az épületen kívül elhelyezett autótöltővel.
+
+*   **Időbélyeg (Timestamp) korrekció:** A BESEN töltő vezérlőegysége (MCU) ellenőrzi az indító parancsban lévő Unix időbélyeget a belső órájához (RTC) képest. Ha túl nagy az eltérés (pl. a budapesti időzóna és a sanghaji időzóna különbsége), elutasítja az indítást. Ennek elkerülésére a `get_shanghai_timestamp()` függvény a helyi időt +8 órás eltolással (Shanghai időzóna szerint) Unix timestamp-pé alakítja. Ezt a módosított időbélyeget használjuk a START parancsok kiküldésekor.
 
 ### Alternatív Megoldás: Mikro-számítógép (pl. Raspberry Pi) a töltő közelében
 Ha a vezérlést futtató fő számítógép túl messze van, a drága külső antenna helyett kiváló alternatíva egy olcsó, Wi-Fi és Bluetooth képes mikro-számítógép (pl. **Raspberry Pi Zero 2 W, Raspberry Pi 3, 4 vagy 5**) elhelyezése a töltő közvetlen közelében (pl. a garázsban). 
@@ -56,7 +57,7 @@ A vezérlőszoftver szorosan együttműködik a Deye inverteren beállított bel
 
 ## 4. Felhasználói Felület és Műszerfal Útmutató
 
-A webes felület a `http://localhost:8080` (vagy `http://127.0.0.1:8080`) címen érhető el a futtató gépről. A helyi hálózat egyéb eszközeiről (pl. mobiltelefonról, táblagépről) a futtató számítógép helyi hálózati IP-címével és a port megadásával érhető el (pl. `http://192.168.0.8:8080`). A felület prémium, áttetsző sötétszürke glassmorphic dizájnt kapott, amely mögött a gyökérkönyvtárba helyezett `background.png` háttérkép stílusosan átsejlik.
+A webes felület a `http://localhost:8080` (vagy `http://127.0.0.1:8080`) címen érhető el a futtató gépről. A helyi hálózati IP-címekkel és porttal is elérhető (pl. `http://192.168.0.8:8080`). A felület prémium, áttetsző sötétszürke glassmorphic dizájnt kapott, amely mögött a gyökérkönyvtárba helyezett `background.png` háttérkép stílusosan átsejlik.
 
 ### A) Színkódolt Mérések (Áramirány Jelzése)
 A kezelőfelület jobb oldalán lévő **Mérések & Visszacsatolás** kártyán a legfontosabb teljesítményadatok színkódolása a következő:
@@ -74,7 +75,10 @@ A kezelőfelület teljes körű mobil-optimalizálást kapott (`1024px` képerny
 *   **Egykártyás (Single-Card) elrendezés:** A végtelen görgetés elkerülése érdekében mobilon egyszerre mindig csak egy kiválasztott vezérlőpanel vagy mérési blokk látható.
 *   **Tapadós (Sticky) Mobil Státusz Sáv:** A képernyő tetején rögzített státusz sáv valós idejű LED-szerű visszajelzőkkel mutatja a kapcsolatok (Deye, BESEN) és az aktív üzemmódok (Auto, Ütemezett) állapotát.
 *   **Mobil-optimalizált Naptár és Űrlapok:** Az ütemezési sorok 3 szintes blokkokká alakulnak (külön sorba kerül a csúszka és a felülbírálási opció), így ujjheggyel is könnyen kezelhetővé válnak. Minden egyéb beviteli mező 1 oszlopos elrendezésbe rendeződik át.
+*   **Start és Stop SoC egy sorban, színkódolt visszajelzéssel:** Az indítási (`auto_start_soc`) és leállítási (`auto_stop_soc`) akkumulátor szintek a felületen egy közös sorban helyezkednek el. A kikapcsolható paraméterek (mint a `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`) 0 érték esetén szürkén jelennek meg (inaktív státusz), míg érvényes érték esetén kék színnel világítanak (aktív státusz).
+*   **Kattintható csúszkák & dinamikus kitöltés:** A töltőáram beállító csúszkák (sliders) a sáv tetszőleges pontjára kattintva vagy koppintva is a megfelelő értékre ugranak. A csúszkák kék háttérszíne dinamikusan (linear-gradient formájában) mutatja a beállított kitöltési szintet.
 *   **Cache-Control védelem:** A HTTP szerver automatikus no-cache fejlécekkel küldi el a lapot, így a mobil böngészők nem tudják a régi elrendezéseket gyorsítótárazni (cache-elni).
+*   **Tooltip elrendezés és eseménykezelés:** Mobilon a tooltip-ek az info ikonok alá nyílnak meg lefelé (elkerülve a tapadós fejléc általi takarást), szélességük `220px`-re korlátozódik, és a jobb szélen lévő elemeknél balra felé terjeszkednek a képernyő-túlnyúlás megelőzésére. Globális kliensoldali eseménykezelés blokkolja a click események buborékolását a `.tooltip-container` elemeknél, megelőzve a szülő checkboxok véletlen átváltását.
 
 ### C) Élő Töltési Teljesítmény és Energia Korrekció
 *   **Töltési teljesítmény panel:** A fázis táblázat mellett elhelyezett önálló, kompakt kijelző valós időben mutatja az autóba táplált összesített elektromos teljesítményt kilowattban (kW), amelyet a fázis feszültségek és áramok szorzatainak összegeként számol ki a kliensoldali felület: `(V1*I1 + V2*I2 + V3*I3) / 1000`. Tétlen állapotban a kijelző `0.00 kW` értéket mutat.
@@ -91,6 +95,7 @@ A napelemes felesleget maximalizáló intelligens üzemmód.
 *   **Napelemes mód bekapcsolása:** A checkbox-szal aktiválhatod a Solar szabályozást.
 *   **Maximális töltőáram (6-16A):** Meghatározza a legnagyobb töltőáramot. Ha a „Szoftveres szabályzás kikapcsolása” be van jelölve, az autó a saját fizikai korlátjával (vagy a töltőn beállított maximummal) fog tölteni.
 *   **Indítási akku szint (SoC %):** A minimális házi akku szint, ami alatt a töltés nem indulhat el (ajánlott: `100%`).
+*   **Leállítási akku szint (SoC %):** Az a minimális házi akkumulátor töltöttségi szint (pl. `20%`), amely alá esve a töltés azonnal leáll, hogy megóvja a háztartási akkumulátort a túlzott lemerüléstől (0% esetén a szabály inaktív).
 *   **Hálózati fogyasztás küszöbérték (W):** Azt a hálózati import korlátot adja meg (pl. `2000 W`), ami felett a hálózati töltés késleltetett leállítása elindul.
 *   **Hálózati töltés késleltetett leállítása (perc):** Felhőátvonulások áthidalására szolgál. A program ennyi percig engedi még a hálózati importot a leállítás előtt (ha `0`, azonnal leáll).
 *   **Ház UPS túlterhelés-védelem (W):** Ha az UPS kimenet terhelése ezt átlépi, a töltés azonnal leáll (ajánlott: `3000 W` - `5000 W` az inverter és a kismegszakítók méretétől függően).
@@ -105,11 +110,13 @@ Időalapú töltésvezérlés heti bontásban.
     *   Töltőáram korlát (6-16A).
     *   **Solar Auto felülírása (Prioritás):** Ha be van jelölve, akkor ebben az időablakban a napelemes és akkumulátoros leállítási szabályok felülírásra kerülnek (biztosított töltés).
 
+*   **Töltési rekord feldolgozása (`0x000A` csomag):** A `0x000A` (10-es kódú) csomag a töltő által küldött történeti töltési rekord. A program feldolgozza a csomagot, kiolvasva a töltést indító RFID kártya azonosítóját (bájtok 1-16), a leállítás okát (bájtok 17-32, pl. `"Pull Plug"`), a dátum-alapú munkamenet azonosítót (bájtok 33-48), a kezdési és befejezési Unix időbélyegeket, a töltési időtartamot, valamint a kezdő, a befejező és a betöltött energiát (Wh). A csomag megfelelő kezelése megakadályozza a hamis leállásokat (korábban a kezeletlen csomag első bájtjait a vezérlő tévesen állapotváltozásként értelmezte, ami nemkívánatos leállásokhoz vezetett).
+
 ### 3. Force (Kézi Felülbírálás) Üzemmód
 Azonnali kézi beavatkozásra szolgáló vezérlő felület.
 *   **Kézi indítás (Start):** Azonnal elindítja a töltést a beállított áramerősséggel. Amint a töltési folyamat befejeződik (pl. tele lett az autó vagy lehúzták a kábelt), a kézi felülbírálás automatikusan megszűnik, és visszaáll a Solar/Ütemezett automatizmus.
 *   **Kézi Stop (Hard Stop):** Azonnal leállítja a töltést és **felfüggeszti a Solar/Ütemezett automatizmusokat** mindaddig, amíg manuálisan vissza nem vonod a felülbírálást (vörös "Visszavonás" gomb).
-*   **Ideiglenes leállítás (Soft Stop):** Leállítja az éppen futó töltést, de a háttérben futó automatikus szabályokat nem írja felül. Ha a Solar Auto feltételek később újra teljesülnek, a töltés magától elindulhat.
+*   **Ideiglenes leállítás (Soft Stop):** Leállítja az éppen futó töltést, de a háttérben futó automatikus szabályokat nem írja felül. Ha a Solar Auto feltételek újra teljesülnek, a töltés magától elindulhat.
 
 ---
 
@@ -148,6 +155,8 @@ python deye_besen_controller.py --sim
 ```
 *A teszteléshez helyezz el egy tetszőleges képet `background.png` néven a futtatási mappa mellé.*
 
+*   **Csúszka háttérszínezési javítás:** A dashboard betöltésekor a nagy áramerősség-csúszkák kék háttere most már helyesen tükrözi a konfigurált áramerősség értéket. Korábban a csúszkák háttere alapértelmezetten 50%-on állt a betöltéskor, és csak klikkelés után ugrott a helyére. Ezt a JavaScript inicializációs sorrendjének módosításával javítottuk.
+
 ### C) Indítás Éles módban
 Futtasd a scriptet paraméter nélkül:
 ```bash
@@ -176,7 +185,9 @@ A program indításakor beolvassa a `config.json` fájlt. Ha nem létezik, létr
 | `charger_name` | string | A BESEN BS20 autótöltő Bluetooth neve. | `"ACP#DefaultName"` |
 | `charger_mac` | string | A BESEN BS20 autótöltő Bluetooth MAC címe. | `"00:11:22:33:44:55"` |
 | `charger_password` | string | A töltő bejelentkezési jelszava (6-bájtos PIN vagy 12-karakteres hex jelszó). | `"YOURPIN"` |
+| `charger_username` | string | (Kódban rögzített) Töltő bejelentkezési felhasználónév (biztonsági okokból `"BDmanager"`-re módosítva). | `"BDmanager"` |
 | `start_soc` | integer | Háztartási akkumulátor SoC %, amely felett a töltés elindulhat (pl. `100`). | `100` |
+| `stop_soc` | integer | Háztartási akkumulátor SoC %, amely alatt a töltés leáll (0 esetén ki van kapcsolva). | `0` |
 | `stop_import_limit` | integer | Maximálisan megengedett hálózati fogyasztási import (W) a delayed leállítás előtt. | `2000` |
 | `grid_charge_duration_minutes` | integer | Felhőátvonulási késleltetett leállítás ideje (perc). Ha `0`, azonnal leáll a töltés. | `30` |
 | `house_power_limit_w` | integer | Ház UPS túlterhelés-védelmi limit (W). 5 kW-os inverter esetén ajánlott: `4000`. | `4000` |
