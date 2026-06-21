@@ -160,8 +160,6 @@ python deye_besen_controller.py --sim
 ```
 *A teszteléshez helyezz el egy tetszőleges képet `background.png` néven a futtatási mappa mellé.*
 
-*   **Csúszka háttérszínezési javítás:** A dashboard betöltésekor a nagy áramerősség-csúszkák kék háttere most már helyesen tükrözi a konfigurált áramerősség értéket. Korábban a csúszkák háttere alapértelmezetten 50%-on állt a betöltéskor, és csak klikkelés után ugrott a helyére. Ezt a JavaScript inicializációs sorrendjének módosításával javítottuk.
-
 ### C) Indítás Éles módban
 Futtasd a scriptet paraméter nélkül:
 ```bash

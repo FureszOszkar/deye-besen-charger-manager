@@ -207,11 +207,6 @@ For security and privacy reasons, all previous username entries of "Attila" have
 The Web Dashboard uses responsive CSS design with a breakpoint at `1024px`. Above this width, it displays a side-by-side desktop layout; below it, it transitions to a single-card mobile layout.
 *   **Mobile View Manager (`showSection`):** Mobile section switching is managed purely via client-side JavaScript. Clicking items in the mobile overlay menu calls `showSection(sectionId)`, which hides other main container cards and displays only the active container at full screen width, preventing layout stretching.
 
-**Slider background fill fix:**
-On dashboard load, high current sliders had a blue background defaulting to 50% (half-filled), regardless of the configured real current value (e.g., 6A), until the user clicked. We fixed this by changing the JS initialization order: we run `document.querySelectorAll('input[type="range"]').forEach(updateSliderBackground);` after loading configuration values into the DOM, so sliders appear with the correct background fill based on the actual configured value.
-*   **Cache-Control Headers**: To prevent layout rendering anomalies due to browser caching, the `/` web endpoint returns explicit HTTP caching headers set to `no-cache`, `no-store`, and `must-revalidate`.
-*   **Tooltip Layout and Event Handling:** On mobile, tooltips display downwards below the info icons (preventing overlap with the sticky header), are restricted to `220px` in width, and align to the right on right-side components to avoid screen overflow. A global client-side event listener blocks click propagation on `.tooltip-container` elements, preventing accidental toggle changes on parent checkboxes.
-
 ### Endpoints
 * **`GET /`**: Serves the single-page Dashboard HTML (`DASHBOARD_HTML` when authenticated) or the login card (`LOGIN_HTML` when unauthorized).
 * **`GET /background.png`**: Serves the background image from the executable directory (handles PyInstaller temporary folder environments).

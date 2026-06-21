@@ -212,11 +212,6 @@ Biztonsági és adatvédelmi okokból az összes korábbi "Attila" felhasználó
 A webes felület CSS media queryk segítségével teljesen reszponzív. A töréspont meg van emelve `1024px`-re, ami felett asztali (kétoszlopos), alatta pedig mobil (egykártyás) elrendezés jelenik meg.
 *   **Mobil navigáció (`showSection`):** Mobilon a szekciók közötti navigációt a kliensoldali JavaScript végzi. A hamburger menüben történő kattintáskor a `showSection(sectionId)` függvény elrejti a többi fő konténert, és csak a kiválasztott szekció kártyáját helyezi el a DOM-ban (`display: flex` vagy `display: grid` módban), megelőzve az oldalszélesség túlnyúlását.
 
-**Csúszka háttérszínezési javítás:**
-A műszerfal betöltésekor a nagy áramerősség-csúszkák kék háttere alapértelmezetten 50%-on állt (félállásban ragadt), függetlenül a konfigurációban megadott valós áramerősségtől (pl. 6A), amíg a felhasználó bele nem kattintott. Ezt a JavaScript inicializációs sorrendjének javításával oldottuk meg: az `updateSliderBackground` hívást a konfigurációs értékek DOM-ba való betöltése után futtatjuk le, így a csúszka a tényleges konfigurált áramértéknek megfelelő kitöltéssel jelenik meg betöltéskor.
-*   **Szolgáltatott fejlécek**: A gyorsítótárazási hibák elkerülése érdekében a `/` végpont lekérésekor a szerver explicit módon `no-cache`, `no-store` és `must-revalidate` fejléceket küld a kliens felé.
-*   **Tooltip elrendezés és eseménykezelés:** Mobilon a tooltip-ek az info ikonok alá nyílnak meg lefelé (elkerülve a tapadós fejléc általi takarást), szélességük `220px`-re korlátozódik, és a jobb szélen lévő elemeknél balra felé terjeszkednek a képernyő-túlnyúlás megelőzésére. Globális kliensoldali eseménykezelés blokkolja a click események buborékolását a `.tooltip-container` elemeknél, megelőzve a szülő checkboxok véletlen átváltását.
-
 ### Végpontok
 * **`GET /`**: Visszaadja a statikus Dashboard HTML kódot (`DASHBOARD_HTML`, ha hitelesített) vagy a bejelentkező lapot (`LOGIN_HTML`, ha nem hitelesített).
 * **`GET /background.png`**: Kiszolgálja a háttérképet a futtatható program mappájából (támogatja a becsomagolt `.exe` környezetet is).
