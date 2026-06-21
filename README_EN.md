@@ -1,3 +1,8 @@
+Created At: 2026-06-19T23:19:05Z
+Completed At: 2026-06-19T23:19:05Z
+File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/README_EN.md`
+Total Lines: 217
+Total Bytes: 21196
 # Deye & BESEN Integrated Charger Controller System
 ## System Documentation and User Manual
 
@@ -44,14 +49,17 @@ Continuous local network connection is required for the Deye inverter's Wi-Fi st
 
 The controller software works in close harmony with the Deye inverter's internal battery management logic (Time-of-Use settings, charge/discharge priorities):
 
-*   **Solar Priority:** Deye's internal regulation prioritize supplying energy to the home loads first, charging the home battery second, and exporting any remaining excess power to the grid third.
-*   **Battery Protection and Start SoC:** The controller monitors the home battery level (SoC %). Using the `start_soc` parameter (e.g., set to 100%), you can guarantee that the car charging only starts once the home battery is fully charged. This prevents the car from prematurely draining the home battery when solar excess is not yet sufficient.
+*   **Solar Priority:** Deye's internal regulation prioritizes supplying energy to the home loads first, charging the home battery second, and exporting any remaining excess power to the grid third.
+*   **Battery Protection and Start SoC:** The controller monitors the home battery level (SoC %). Using the `start_soc` parameter (e.g., set to 100%), car charging only starts once the home battery is fully charged. This prevents the car from prematurely draining the home battery when solar excess is not yet sufficient.
 *   **Critical Installation Detail – Entire House on the UPS (Backup) Branch, Charger on the Grid Branch:**
-    *   **Due to the specific physical wiring, the entire house is connected to the inverter's UPS (Backup) branch, but ONLY the house.** The EV charger (EVSE) does not draw power through the house panel; it is wired directly next to the utility meter, before the inverter (on the Grid / utility side).
-    *   Since the house is on the UPS branch, all household consumption flows through the inverter's internal power electronics, which has a strict hardware limit of **exactly 5 kW**.
-    *   If the household consumption (e.g., heat pump, washing machine, oven) approaches or exceeds this 5 kW limit, the inverter will trip on overload, causing an **instant and complete blackout in the house** (even if the utility grid is online).
-    *   Therefore, the **House UPS Overload Protection (`house_power_limit_w`)** feature in this software is not an optional comfort feature, but a critical line of defense. The controller continuously monitors the UPS port load (`ups_load_power`). If it exceeds the safety threshold (e.g., 4000 W), **it immediately stops the EV charger** to relieve the system load and prevent a blackout.
-    *   **Calculation Implication:** Since the EV charger is on the grid side, its power draw is calculated as the difference between the main grid utility meter (external CT) and the inverter's internal grid meter. On the UI dashboard, this is displayed as **"Nem UPS ágon lévő fogyasztók" (Non-UPS Consumers)**, which represents the combined consumption of the EV charger and any other non-UPS loads.
+    *   Due to the specific physical wiring, the entire house is connected to the inverter's UPS (Backup) branch, but ONLY the house. The EV charger (EVSE) does not draw power through the house panel; it is wired directly next to the utility meter, before the inverter (on the Grid / utility side).
+    *   Since the house is on the UPS branch, all household consumption flows through the inverter's internal power electronics, which has a strict hardware limit of exactly 5 kW.
+    *   If the household consumption (e.g., heat pump, washing machine, oven) approaches or exceeds this 5 kW limit, the inverter will trip on overload, causing an instant and complete blackout in the house (even if the utility grid is online).
+    *   Therefore, the **House UPS Overload Protection (`house_power_limit_w`)** feature in this software is not an optional comfort feature, but a critical line of defense. The controller continuously monitors the UPS port load (`ups_load_power`). If it exceeds the safety threshold (e.g., 4000 W), it immediately stops the EV charger to relieve the system load and prevent a blackout.
+    *   **Calculation Implication:** Since the EV charger is on the grid side, its power draw is calculated as the difference between the main grid utility meter (external CT) and the inverter's internal grid meter. On the UI dashboard, this is displayed as "Nem UPS ágon lévő fogyasztók" (Non-UPS Consumers), which represents the combined consumption of the EV charger and any other non-UPS loads.
+*   Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently (sequential rules).
+*   Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes means IMMEDIATE shutdown (0 minutes delay) rather than disabling the check. The check is active when grid power threshold > 0.
+*   HTML input step values for Watt parameters are set to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 ---
 
@@ -69,16 +77,7 @@ On the **Mérések & Visszacsatolás (Measurements & Feedback)** card on the rig
     *   **RED (Negative value):** The battery is currently **discharging** (supplying energy to the house).
 *   **PV, House UPS load, and Non-UPS consumers load** are displayed in white for clean readability.
 
-### B) Mobile and Responsive View
-The interface is fully optimized for mobile screens (activated below `1024px` width):
-*   **Hamburger Menu & Glassmorphic Overlay:** On mobile, the traditional desktop tab buttons are hidden. Instead, a clean hamburger icon (☰) in the header opens a beautiful, glassmorphic full-screen navigation overlay.
-*   **Single-Card Section Layout:** To eliminate endless scrolling, only one active configuration card or telemetry panel is visible at a time.
-*   **Sticky Status Bar:** A thin header bar sticks to the top of the mobile screen. It provides real-time LED-like indicator dots showing the connection status (Deye, BESEN) and the active modes (Solar Auto, Scheduled).
-*   **Touch-Friendly Scheduled Calendar & Forms:** The weekly schedule table collapses into a 3-level layout per day (times, sliders, and overrides are separated), making it easy to drag sliders and check options on touchscreens. All other input fields stack into a single column.
-*   **Start & Stop SoC in a Single Row with Color Feedback:** The start (`auto_start_soc`) and stop (`auto_stop_soc`) battery levels are placed side-by-side in a single row. Optional parameters (such as `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`) turn gray (`.input-inactive`) when set to 0 (disabled), and light up in blue (`.input-active`) when active (> 0).
-*   **Clickable Sliders with Dynamic Background Fill:** The current limit range sliders respond to direct clicks or taps along their tracks. The background fill adjusts dynamically (using linear-gradient) to visually reflect the selected current level.
-*   **Cache-Control Protection:** The HTTP server sends `Cache-Control` headers, forcing mobile browsers to always load the latest design, preventing interface updates from being cached.
-*   **Tooltip Layout and Event Handling:** On mobile, tooltips display downwards below the info icons (preventing overlap with the sticky header), are restricted to `220px` in width, and align to the left on right-side components to avoid screen overflow. A global client-side event listener blocks click propagation on `.tooltip-container` elements, preventing accidental toggle changes on parent checkboxes.
+Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently. Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check. The check remains active when the grid power threshold is greater than 0. HTML input step values for Watt parameters are set to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 ### C) Live Charging Power and Energy Correction
 *   **Charging Power Panel:** A dedicated, compact panel next to the phase table displays the live total power delivered to the car in kilowatts (kW). It is calculated on the client-side as `(V1*I1 + V2*I2 + V3*I3) / 1000`. When charging is inactive, it naturally reads `0.00 kW`.
@@ -92,13 +91,14 @@ The controller offers three main operating modes, which you can select at the to
 
 ### 1. Auto (Solar Auto) Mode
 An intelligent mode designed to maximize the utilization of solar excess.
-*   **Enable Solar Auto:** Toggle to activate the solar excess regulation.
-*   **Max Charger Current (6-16A):** Sets the maximum charging speed. If the "Disable software current regulation" checkbox is ticked, the vehicle will charge at its own physical maximum speed (or the charger's physical limit).
-*   **Start Battery SoC (%):** The minimum home battery level below which charging cannot start (recommended: `100%`).
-*   **Stop Battery SoC (%):** The minimum home battery level (e.g., `20%`) below which charging stops immediately to protect the home battery from deep discharge (if `0`, the rule is inactive).
-*   **Grid Consumption Limit (W):** The network import limit (e.g., `2000 W`) above which the delayed grid charging shutdown initiates.
-*   **Delayed Shutdown (minutes):** Used to bridge passing clouds. The program allows grid import for this many minutes before stopping (if `0`, it stops immediately).
-*   **House UPS Overload Protection (W):** If the load on the UPS output exceeds this value, charging stops instantly to prevent household blackout (recommended: `3000 W` - `5000 W`, depending on inverter and breaker ratings).
+*   **Napelemes mód bekapcsolása (Enable Solar Auto):** Activates the solar excess logic.
+*   **Maximális töltőáram (Max Charger Current, 6-16A):** Sets the maximum charging speed. If the "Disable software current regulation" checkbox is ticked, the vehicle charges at its own physical maximum speed (or the charger's physical limit).
+*   **Indítási akku szint (Start Battery SoC %):** The minimum home battery level below which charging cannot start (recommended: `100%`).
+*   **Hálózati fogyasztás küszöbérték (Grid Consumption Limit, W):** The grid import threshold (e.g., `2000 W`) above which the delayed shutdown timer begins.
+*   **Hálózati töltés késleltetett leállítása (Delayed Shutdown, minutes):** Helps bridge passing clouds. The system allows grid import for this many minutes before stopping. Setting this to `0` means IMMEDIATE shutdown rather than disabling the check, provided the grid power threshold is greater than `0`.
+*   **Ház UPS túlterhelés-védelem (UPS Power Limit, W):** If the load on the UPS port exceeds this value, charging stops instantly (recommended: `3000 W` - `5000 W`, depending on inverter and breaker ratings).
+
+Additionally, the Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently. The HTML input step values for Watt parameters allow single Watt resolution settings (e.g., 80 W).
 
 ### 2. Scheduled (Calendar) Mode
 Time-based charging control with weekly scheduling.
@@ -110,13 +110,20 @@ Time-based charging control with weekly scheduling.
     *   Current limit (6-16A).
     *   **Solar Auto felülírása (Override Solar Auto):** If checked, solar and battery shutdown rules are ignored during this window (guaranteed night/timed charging).
 
-*   **Charge Record Processing (`0x000A` packet):** The `0x000A` (decimal 10) packet represents a historical charge record sent by the EVSE. The program processes this packet to extract the initiating RFID card UID (bytes 1-16), the stop reason (bytes 17-32, e.g., `"Pull Plug"`), the date-based session ID (bytes 33-48), start/end Unix timestamps, session duration, and starting, ending, and total charged energy values in Wh. Safely processing this packet prevents false charging shutdowns (previously, the first bytes of the unhandled packet were misread as a status change, causing incorrect stops).
+Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently. Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes means IMMEDIATE shutdown without disabling the check, which remains active when grid power threshold > 0. HTML input step values for Watt parameters are set to step=1, allowing single Watt resolution settings (e.g., 80 W).
+
+- **Charge Record Parsing:** The `0x000A` package, which contains charge records, is now correctly parsed. This prevents false stops caused by misinterpretation of the payload as a status update. The parser extracts and logs the username initiating the charge from bytes 1 to 17 of the payload.
 
 ### 3. Force (Manual Override) Mode
 For immediate manual intervention and testing.
 *   **Kézi indítás (Start):** Immediately starts charging at the configured current. Once charging completes (e.g., car is fully charged or unplugged), the manual override automatically clears and reverts to Solar/Scheduled automation.
 *   **Kézi Stop (Hard Stop):** Immediately stops charging and **suspends all Solar/Scheduled automation** until you manually click the red "Visszavonás" (Cancel Override) button.
 *   **Ideiglenes leállítás (Soft Stop):** Stops the current charge session but does not suspend automation rules. If Solar Auto conditions are met again later, charging can automatically restart.
+
+The software recently had the following changes implemented:
+1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently (sequential rules).
+2. Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes means IMMEDIATE shutdown (0 minutes delay) rather than disabling the check. The check is active when grid power threshold > 0.
+3. HTML input step values for Watt parameters were changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 ---
 
@@ -177,44 +184,24 @@ Once compilation completes, copy the generated `deye_besen_controller.exe` from 
 
 Upon startup, the program reads the `config.json` file. If it does not exist, it will be automatically created with built-in default values (`DEFAULT_CONFIG`). The table below describes the function of each configuration key:
 
-| Key | Type | Description | Example Value |
-|---|---|---|---|
-| `inverter_ip` | string | The local IP address of your Deye inverter's Wi-Fi logger stick (LSW-3). | `"192.168.0.100"` |
-| `inverter_port` | integer | Modbus TCP connection port for the logger stick (typically `8899`). | `8899` |
-| `logger_serial` | integer | The unique 10-digit serial number of your Solarman logger stick. | `1234567890` |
-| `http_port` | integer | The port used by the local web dashboard and REST API (default: `8080`). | `8080` |
-| `charger_name` | string | Bluetooth name of the BESEN BS20 car charger. | `"ACP#DefaultName"` |
-| `charger_mac` | string | Bluetooth MAC address of the BESEN BS20 car charger. | `"00:11:22:33:44:55"` |
-| `charger_password` | string | Charger authorization password (6-byte PIN or 12-character hex key). | `"YOURPIN"` |
-| `charger_username` | string | (Hardcoded) Charger login username (modified to `"BDmanager"` for privacy). | `"BDmanager"` |
-| `start_soc` | integer | Home battery SoC % threshold above which car charging is allowed to start. | `100` |
-| `stop_soc` | integer | Home battery SoC % threshold below which car charging stops (0 to disable). | `0` |
-| `stop_import_limit` | integer | Maximum allowed grid import power (W) before starting delayed shutdown. | `2000` |
-| `grid_charge_duration_minutes` | integer | Delayed shutdown grace period (minutes) for cloud cover. If `0`, stops immediately. | `30` |
-| `house_power_limit_w` | integer | House UPS overload protection limit (W). Recommended for 5 kW inverter: `4000`. | `4000` |
-| `control_mode` | string | Startup control mode (`monitoring` / `auto` / `schedule` / `force`). | `"monitoring"` |
-| `persist_mode_on_restart` | boolean | If `true`, the system restarts in the last configured mode and state. | `true` |
-| `charger_max_amps` | integer | Maximum current limit (A) sent to the EV (must be between `6` and `16`). | `16` |
-| `force_submode` | string | Default manual override submode (`manual_start` / `manual_stop`). | `"manual_stop"` |
-| `schedule_solar_auto` | boolean | If `true`, Solar Auto rules are applied outside of scheduled time windows. | `false` |
-| `auto_enabled` | boolean | Active status of Solar Auto mode from the last save. | `false` |
-| `schedule_enabled` | boolean | Active status of Scheduled mode from the last save. | `false` |
-| `web_auth_enabled` | boolean | If `true`, requires password login to access the web UI and REST API. | `true` |
-| `web_password` | string | The custom password used for web interface authentication. | `"admin"` |
-| `forced_schedule` | array | Weekly calendar schedule settings array containing time windows, currents, etc. | *(See config_example.json)* |
+The software recently had the following changes implemented:
+1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently.
+2. Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, which remains active when the grid power threshold is greater than 0.
+3. HTML input step values for Watt parameters have been changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 ---
 
 ## Acknowledgments
 
-*   **slespersen:** Special thanks for the [slespersen/evseMQTT](https://github.com/slespersen/evseMQTT) GitHub project! His work on reverse-engineering and implementing the Bluetooth Low Energy (BLE) protocol for the BESEN BS20 charger saved us a significant amount of time and experimentation, providing the solid foundation for our controller's BLE communication.
-*   **Antigravity (Google DeepMind):** Special thanks to the AI-powered pair programming assistant for refactoring the code, creating the asynchronous control and simulation loops, embedding safety guards, developing the premium glassmorphic web dashboard, and compiling the complete bilingual documentation.
+Special thanks for the [slespersen/evseMQTT](https://github.com/slespersen/evseMQTT) GitHub project! His work on reverse-engineering and implementing the Bluetooth Low Energy (BLE) protocol for the BESEN BS20 charger provides a solid foundation for our controller's BLE communication. Special thanks to the AI-powered pair programming assistant for refactoring the code, creating the asynchronous control and simulation loops, embedding safety guards, developing the premium glassmorphic web dashboard, and compiling the complete bilingual documentation.
 
 ---
 
 ## Disclaimer & Bug Reporting
 
-> [!WARNING]
-> **Disclaimer:** Despite thorough testing and built-in safety mechanisms (cooldown, overload protection, fail-safe), unexpected logical or software errors may occur. Use this software entirely at your own risk. The developers accept no liability for any damage to the inverter, battery, car charger, or household electrical grid.
+The software recently had the following changes implemented:
+1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently (sequential rules).
+2. Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes results in IMMEDIATE shutdown (0 minutes delay) rather than disabling the check. The check remains active when grid power threshold > 0.
+3. HTML input step values for Watt parameters have been changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 If you encounter any logical bugs, unexpected behavior, or malfunctions during use, please **report them in the GitHub Issues section of this repository** so we can fix them! Thank you very much for your feedback!

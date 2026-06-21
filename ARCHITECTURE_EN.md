@@ -1,3 +1,8 @@
+Created At: 2026-06-21T15:38:35Z
+Completed At: 2026-06-21T15:38:35Z
+File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/ARCHITECTURE_EN.md`
+Total Lines: 242
+Total Bytes: 21520
 # Deye & BESEN Controller – Architecture and Code Structure Documentation
 
 This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `deye_besen_controller.py` software for developers.
@@ -50,14 +55,14 @@ Since the Web Server (HTTP thread) and the `asyncio` loop (main thread) run conc
 Upon startup, the `main()` function launches several async tasks in parallel:
 
 ### 1. `run_inverter_polling()`
-* **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds.
+* **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds. The connection is now persistent (using a global _persistent_inverter), and it disconnects and resets only if a socket/Modbus error occurs, thus avoiding socket memory leaks.
 * **Library:** `pysolarmanv5` (connecting on TCP port `8899`).
 * **Threading Safety (Asynchronization):** Since `pysolarmanv5` Modbus polling contains synchronous blocking network calls, these operations are isolated inside a blocking helper `fetch_inverter_data_blocking()` and run in a separate background worker thread using `asyncio.to_thread()`. This prevents network glitches on the Deye logger stick from blocking the main event loop and causing Bluetooth timeout disconnects.
 * **Queried Registers:**
   * **Register 607 (Signed 16-bit):** Inverter grid-port power (internal grid meter).
   * **Register 619 (Signed 16-bit):** Utility grid power (measured by external CT clamps at the meter).
   * **Register 643 (Unsigned 16-bit):** Inverter UPS (Backup) output load. This represents the total consumption of the household.
-  * **Register 175 (Unsigned 16-bit):** Solar photovoltaic generation (PV) power.
+  * **Registers 672-673 (Unsigned 16-bit, summed):** Solar photovoltaic generation (PV) power (PV1 & PV2 Power in Watts).
   * **Register 590 (Signed 16-bit):** Storage battery power (+ = charging, - = discharging).
   * **Register 588 (Unsigned 16-bit):** Storage battery State of Charge (SoC %).
 * **Calculated Non-UPS load:** `charger_power = max(0, grid_power_external - grid_power_internal)`. This calculates the total load of all consumers on the grid side (before the inverter), which includes the EV charger and other non-UPS loads.
@@ -77,14 +82,16 @@ Upon startup, the `main()` function launches several async tasks in parallel:
   * `FFC1` (Write): Used to send the login credentials.
 
 ### 3. `run_charge_controller()`
-* **Task:** The main control loop (runs every 5 seconds).
+* **Task:** The main control loop runs every 5 seconds.
 * **Operation:** Reads telemetry from `shared_state`, evaluates active automation rules (Auto, Scheduled, Force), and pushes packets into the `ble_command_queue` when state changes occur.
-* **Unified Solar Auto Rules:** The solar charging logic runs inside a single, unified decision block in the control loop. Charging starts based on the battery start threshold (`battery_soc >= start_soc`), and charging stops are governed by evaluating the following 3 protection rules in sequence:
-  1. *House Overload Protection:* If the UPS load exceeds the `house_power_limit_w` threshold, charging stops immediately.
-  2. *Battery Discharge Protection:* If `stop_soc` > 0 and the home battery SoC drops below the `stop_soc` limit, charging stops immediately.
-  3. *Grid Import Limit:* If grid import exceeds the `stop_import_limit`, a delayed timer starts, and once it reaches `grid_charge_duration_minutes` minutes, charging stops.
-* **Manual Override Handling (Soft Stop / Restart):** Process manual overrides (`apply_with_stop`, `apply_with_restart`) at the very beginning of the loop, before mode evaluation or the early `continue` in `monitoring` mode. This guarantees that clicking "Soft Stop" stops charging immediately, even without active automation rules.
-* **Manual Start Race Condition Fix:** By implementing the `manual_start_requested` state flag to guard the BLE transmission, the system prevents the startup sequence from being prematurely reset to `schedule` mode by the loop's cleanup checks before the START command packet is successfully sent via BLE.
+* **Unified Solar Auto Rules:** The solar charging logic evaluates three protection rules sequentially and independently:
+  1. *Grid Import Limit:* Charging stops if grid import exceeds the `stop_import_limit`.
+  2. *Battery Stop SoC:* Charging stops if the home battery SoC drops below the `stop_soc` limit.
+  3. *House UPS Overload Protection:* Charging stops immediately if the UPS load exceeds the `house_power_limit_w` threshold.
+* **Grid Charge Delayed Shutdown:** Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, provided the grid power threshold is greater than 0.
+* **HTML Input Step Values:** The HTML input step values for Watt parameters are set to `step=1`, allowing single Watt resolution settings (e.g., 80 W).
+* **Manual Override Handling (Soft Stop / Restart):** Processes manual overrides (`apply_with_stop`, `apply_with_restart`) at the very beginning of the loop, before mode evaluation or the early `continue` in `monitoring` mode. This guarantees that clicking "Soft Stop" stops charging immediately, even without active automation rules.
+* **Manual Start Race Condition Fix:** Implements the `manual_start_requested` state flag to guard the BLE transmission, preventing the startup sequence from being prematurely reset to `schedule` mode by the loop's cleanup checks before the START command packet is successfully sent via BLE.
 
 ---
 
@@ -154,7 +161,7 @@ The telemetry payload (`payload = packet[21:]`) contains the live status measure
 *   `payload[1:3]`: L1 voltage (scale: 0.1, V)
 
 **Charge Record Processing (`0x000A` packet):**
-At the end of a session (or upon reconnection), the charger transmits the `0x000A` (decimal 10) command packet, which contains historical session records. The software parses and logs these details.
+At the end of a session (or upon reconnection), the charger transmits the `0x000A` (decimal 10) command packet, which contains historical session records.
 The exact binary layout of the payload (`payload = packet[21:]`) is as follows:
 *   `payload[0]`: Phase/line identifier (`line_id`).
 *   `payload[1:17]`: Initiating user RFID card UID (ASCII string, e.g., `"62316176FDFFCBD8"`).
@@ -163,11 +170,17 @@ The exact binary layout of the payload (`payload = packet[21:]`) is as follows:
 *   `payload[64:68]`: Starting Unix timestamp (4-byte Big-Endian uint32).
 *   `payload[68:72]`: Ending Unix timestamp (4-byte Big-Endian uint32).
 *   `payload[72:76]`: Charging duration in seconds (4-byte Big-Endian uint32).
-*   `payload[76:80]`: Starting energy register reading in Wh (4-byte Big-Endian uint32).
-*   `payload[80:84]`: Charged energy during session in Wh (4-byte Big-Endian uint32).
-*   `payload[84:88]`: Ending energy register reading in Wh (4-byte Big-Endian uint32).
-*   `payload[95:97]`: Number of power log entries (2-byte Big-Endian uint16).
-*   `payload[97:]`: Time-series power log array (each entry is a 2-byte Big-Endian integer in Watts, e.g., `0x0FC8` = 4040 W).
+*   `payload[76:80]`: Starting energy register reading in 10 Wh units (4-byte Big-Endian uint32).
+*   `payload[80:84]`: Ending energy register reading in 10 Wh units (4-byte Big-Endian uint32).
+*   `payload[84:88]`: Session energy delivered in 10 Wh units (4-byte Big-Endian uint32). *Note: The software multiplies this by 10 to obtain the correct Wh value.*
+
+**Selective Logging and Background Clearance**:
+The charger broadcasts all uncleared history records sequentially upon reconnection (including external mobile app sessions), prompting the controller to implement an intelligent selective logging and background clearance mechanism. When starting a charge (Manual, Scheduled, or Solar Auto), the generated `charge_id` is stored in the global `_last_initiated_session_id` and saved to `config.json`. Upon receiving a `0x000A` packet, the controller compares its `session_id` with `_last_initiated_session_id`. If they match, the session data is stored in `shared_state["last_charge"]` and persisted to `config.json`, where it is displayed on the dashboard when charging is inactive. If they do not match (external or old backlog session), the controller silently acknowledges and clears the record by sending `0x800A` back to the charger, ensuring it does not get stuck, without overwriting its own session history on the dashboard. The `payload[95:97]` contains the number of power log entries as a 2-byte Big-Endian uint16, and `payload[97:]` consists of a time-series power log array where each entry is a 2-byte Big-Endian integer in Watts (e.g., `0x0FC8` = 4040 W).
+
+Additionally, the software has undergone several recent changes:
+1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently.
+2. Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, provided the grid power threshold is greater than 0.
+3. HTML input step values for Watt parameters have been updated to `step=1`, enabling single Watt resolution settings (e.g., 80 W).
 
 Safely processing this packet prevents false shutdowns. Previously, the first bytes of the unhandled packet were misread as a charging status change (since the RFID string characters did not match the expected status value), causing unexpected stops.
 *   `payload[3:5]`: L1 current (scale: 0.01, A)

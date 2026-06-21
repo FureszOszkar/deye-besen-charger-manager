@@ -1,3 +1,8 @@
+Created At: 2026-06-21T15:38:32Z
+Completed At: 2026-06-21T15:38:32Z
+File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/ARCHITECTURE.md`
+Total Lines: 241
+Total Bytes: 24232
 # Deye & BESEN Vezérlő – Architektúra és Kódstruktúra Leírás
 
 Ez a dokumentum a `deye_besen_controller.py` szoftver belső felépítését, szálkezelési modelljét, adatfolyamát és a BESEN Bluetooth Low Energy (BLE) protokoll működését részletezi fejlesztők számára.
@@ -50,14 +55,14 @@ Mivel a Web Server (HTTP szál) és az `asyncio` eseményhurok (főszál) párhu
 Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladatokat indítja el párhuzamosan:
 
 ### 1. `run_inverter_polling()`
-* **Feladat:** Kapcsolódás a Deye inverter Wi-Fi stickjéhez (Solarman LSW-3 egység) TCP-n keresztül, és a telemetriai adatok lekérdezése 10 másodpercenként.
+* **Feladat:** Kapcsolódás a Deye inverter Wi-Fi stickjéhez (Solarman LSW-3 egység) TCP-n keresztül, és a telemetriai adatok lekérdezése 10 másodpercenként. A kapcsolat mostantól állandó (globális _persistent_inverter használatával), csak akkor bontódik le és nullázódik, ha hálózati vagy Modbus hiba történik, így elkerülve a socket memory leaket.
 * **Használt könyvtár:** `pysolarmanv5` (Modbus RTU over TCP a `8899`-es porton).
 * **Szálkezelési biztonság (Aszinkronizáció):** Mivel a `pysolarmanv5` lekérdezései szinkron (blocking) hálózati műveletek, a hurokban ezeket a `fetch_inverter_data_blocking()` segédfüggvénybe szervezve, az `asyncio.to_thread()` segítségével egy külön háttérszálon hajtjuk végre. Ezzel megakadályozzuk, hogy az inverter esetleges hálózati kiesése vagy lassúsága blokkolja a fő programszálat és megszakítsa a Bluetooth kapcsolatot.
 * **Kiolvasott regiszterek:**
   * **Regiszter 607 (Signed 16-bit):** Inverter belső hálózati teljesítmény (Grid port).
   * **Regiszter 619 (Signed 16-bit):** Külső hálózati teljesítmény (a villanyóra melletti mérő CT-től).
   * **Regiszter 643 (Unsigned 16-bit):** Inverter UPS (Backup) kimeneti terhelése. Ez a ház teljes pillanatnyi fogyasztása.
-  * **Regiszter 175 (Unsigned 16-bit):** Napelemes pillanatnyi termelés (PV).
+  * **Regiszterek 672-673 (Unsigned 16-bit, összeadva):** Napelemes pillanatnyi termelés (PV) power (PV1 & PV2 Power in Watts).
   * **Regiszter 590 (Signed 16-bit):** Háztartási akkumulátor pillanatnyi teljesítménye (+ = töltés, - = kisütés).
   * **Regiszter 588 (Unsigned 16-bit):** Háztartási akkumulátor töltöttségi szintje (SoC %).
 * **Számított Nem UPS fogyasztás:** `charger_power = max(0, grid_power_external - grid_power_internal)`. Ez mutatja meg a nem UPS ágon lévő összes külső fogyasztó (autótöltő és mérőcsoport) összteljesítményét.
@@ -77,12 +82,14 @@ Az alkalmazás indításakor a `main()` függvény az alábbi aszinkron feladato
   * `FFC1` (Write): Ide írjuk be a hitelesítési (Login) jelszót.
 
 ### 3. `run_charge_controller()`
-* **Feladat:** A vezérlő fő döntési ciklusa (5 másodpercenként fut le).
+* **Feladat:** A vezérlő fő döntési ciklusa 5 másodpercenként fut le.
 * **Működés:** Beolvassa a `shared_state`-ből az inverter és a töltő pillanatnyi állapotát, kiértékeli az aktív üzemmódot (Auto, Scheduled, Force), majd ha szükséges, parancs-csomagot helyez el a `ble_command_queue` sorba.
-* **Egységesített Solar Auto szabályok:** A döntési körben a napelemes szabályozás egyetlen strukturált és egységes logikai blokkban fut le. A töltés indítása az akkumulátor indítási küszöbe alapján történik (`battery_soc >= start_soc`), a töltés leállítását pedig az alábbi 3 védelmi szabály kiértékelése vezérli sorrendben:
+* **Egységesített Solar Auto szabályok:** A döntési körben a napelemes szabályozás egyetlen strukturált és egységes logikai blokkban fut le. A töltés indítása az akkumulátor indítási küszöbe alapján történik (`battery_soc >= start_soc`), a töltés leállítását pedig az alábbi 3 védelmi szabály kiértékelése vezérli sorrendben és függetlenül egymástól:
   1. *Ház túlterhelés-védelem:* Ha az UPS terhelés meghaladja a `house_power_limit_w` korlátot, a töltés azonnal leáll.
   2. *Akkumulátor lemerülés-védelem:* Ha a `stop_soc` > 0 és a házi akkumulátor töltöttsége a `stop_soc` limit alá esik, a töltés azonnal leáll.
   3. *Hálózati import limit:* Ha a hálózati import meghaladja a `stop_import_limit` értéket, elindul egy késleltetés, és ha ez eléri a `grid_charge_duration_minutes` percet, a töltés leáll.
+* **Grid charge delayed shutdown:** A "Hálózati töltés késleltetett leállítása (perc)" beállítás 0 értékre állításakor azonnali leállást jelent, nem pedig letiltja a vizsgálatot. A vizsgálat akkor aktív, ha a hálózati energia küszöbe (`grid_power_threshold`) nagyobb mint 0.
+* **HTML input lépéskövek:** A Watt paraméterek HTML beviteli mezőjének lépéskövei `step=1` értékre állnak, így lehetőség van egyszeres Watt felbontású beállításokra (pl. 80 W).
 * **Kézi Leállítások Feldolgozása (Soft Stop / Restart):** A manuális override flageket (`apply_with_stop`, `apply_with_restart`) a hurok legelső pontján dolgozza fel a rendszer, még az üzemmód kiértékelése és a `monitoring` mód miatti esetleges korai visszaugrás (`continue`) előtt. Ezzel biztosítjuk, hogy az Ideiglenes Leállítás (Soft Stop) gomb megnyomásakor a stop parancs azonnal kiküldésre kerüljön, még akkor is, ha nincs aktív szabályozó automatizmus a háttérben.
 * **Kézi indítási versenyhelyzet-kezelés:** A kézi indítási folyamat BLE kiküldését védő `manual_start_requested` állapotjelző beépítésével megakadályoztuk, hogy a hurok elején lévő alapállapot-visszaállító logika idő előtt leállítsa a kézi indítás (`manual_start`) üzemmódot a parancs elküldése előtt.
 
@@ -153,7 +160,7 @@ A telemetria és állapot jelentések hasznos terhe (`payload = packet[21:]`) ta
 *   `payload[1:3]`: L1 feszültség (szorzó: 0.1, V)
 
 **Töltési rekord feldolgozása (`0x000A` csomag):**
-A töltő a töltési folyamatok végén (és újracsatlakozáskor) küldi a `0x000A` (decimal 10) parancskódú csomagot, amely a töltési előzményeket (munkamenet naplót) tartalmazza. A szoftver ezt feldolgozza, és a naplóban megjeleníti a részleteit.
+A töltő a töltési folyamatok végén (és újracsatlakozáskor) küldi a `0x000A` (decimal 10) parancskódú csomagot, amely a töltési előzményeket (munkamenet naplót) tartalmazza.
 A hasznos teher (`payload = packet[21:]`) pontos bájtszerkezete a következő:
 *   `payload[0]`: Fázisszám/vonalazonosító (`line_id`).
 *   `payload[1:17]`: Indító felhasználó RFID kártya azonosítója (ASCII string, pl. `"62316176FDFFCBD8"`).
@@ -162,11 +169,23 @@ A hasznos teher (`payload = packet[21:]`) pontos bájtszerkezete a következő:
 *   `payload[64:68]`: Kezdő Unix időbélyeg (Big-Endian uint32).
 *   `payload[68:72]`: Befejező Unix időbélyeg (Big-Endian uint32).
 *   `payload[72:76]`: Töltési időtartam másodpercben (Big-Endian uint32).
-*   `payload[76:80]`: Kezdő mérőóra állás Wh-ban (Big-Endian uint32).
-*   `payload[80:84]`: Betöltött energia Wh-ban (Big-Endian uint32).
-*   `payload[84:88]`: Befejező mérőóra állás Wh-ban (Big-Endian uint32).
+*   `payload[76:80]`: Kezdő mérőóra állás 10 Wh egységben (Big-Endian uint32).
+*   `payload[80:84]`: Befejező mérőóra állás 10 Wh egységben (Big-Endian uint32).
+*   `payload[84:88]`: Munkamenet (Session) energia 10 Wh egységben (Big-Endian uint32). *Megjegyzés: A szoftver ezt megszorozza 10-zel a pontos Wh érték kalkulációjához.*
+
+**Szelektív naplózás és Háttérbeli lezárás**:
+A töltő újracsatlakozáskor automatikusan elküldi az összes korábbi le nem zárt rekordot sorban egymás után (akár idegen mobilappos indításokét is), a szoftver egy intelligens szelektív logolási és háttértörlési folyamatot alkalmaz:
+1. Az indítási folyamatoknál (Kézi, Ütemezett, Solar Auto) a generált `charge_id`-t elmentjük a `_last_initiated_session_id` globális változóba és a `config.json` fájlba.
+2. `0x000A` csomag vételekor összevetjük a `session_id`-t a `_last_initiated_session_id` értékével.
+3. Ha egyezik: Elmentjük a rekordot a `shared_state["last_charge"]` alá, és kiírjuk a `config.json` lemezre. Ez jelenik meg a Dashboard-on legutóbbi töltésként.
+4. Ha nem egyezik (idegen app vagy régi beragadt rekord): A szoftver csendben kiküldi a lezárást (`0x800A` nyugta) a töltőnek, hogy törlődjön a memóriájából és ne ragadjon be, de **NEM** írja felül a saját szoftveres töltési naplónkat a felületen.
 *   `payload[95:97]`: Teljesítménynapló bejegyzések száma (Big-Endian uint16).
 *   `payload[97:]`: Idősoros teljesítmény-log adatsor (minden bejegyzés 2-bájtos Big-Endian egész szám W-ban, pl. `0x0FC8` = 4040 W).
+
+A szoftverben a következő változásokat hajtottunk végre:
+1. A Solar Auto szabályok (Hálózati import korlátja, Akkumulátor leállítási SoC-ja, Ház UPS túlzott terhelésvédelem) egymás után és függetlenül lesznek kiértékelve.
+2. A "Hálózati töltés késleltetett leállítása (perc)" beállítás 0 perc értékére állításakor azonnali leállást jelent, nem pedig letiltja a vizsgálatot. A vizsgálat akkor aktív, ha a hálózati energia küszöbértéke nagyobb mint 0.
+3. Az HTML beviteli lépésközei a Watt paraméterekhez 1-re lettek állítva, így lehet egy W-os felbontású beállítást megadni (pl. 80 W).
 
 A csomag feldolgozása megelőzi a hamis leállásokat. Korábban ugyanis a kezeletlen csomag első bájtjait a rendszer tévesen töltési állapotváltozásként értelmezte (mivel az RFID kártyaszám első betűi nem egyeztek a várt státuszokkal), ami a töltés váratlan leállását okozta.
 *   `payload[3:5]`: L1 áramerősség (szorzó: 0.01, A)

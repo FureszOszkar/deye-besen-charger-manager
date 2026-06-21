@@ -231,11 +231,21 @@ LOGIN_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+_recently_cleared_sessions = {}
+_last_initiated_session_id = ""
+
+last_telemetry_time = None
+session_energy_accumulator = 0.0
+_last_save_time = 0.0
+
 # Globális állapot thread-safe eléréssel
 shared_state = {
     # Kapcsolatok állapota
     "inverter_connected": False,
     "charger_connected": False,
+    "session_energy_accumulator": 0.0,
+    "session_last_time": 0.0,
+    "session_last_power": 0.0,
     
     # Inverter telemetria
     "grid_power": 0,          # W (Register 619 - Külső Grid CT)
@@ -252,6 +262,7 @@ shared_state = {
     "temperature_internal": 0.0,  # °C
     "pull_plug": False,           # Csatlakozó állapota
     "charging_active": False,     # BLE szerinti futás állapot
+    "last_charge": {},            # Legutóbbi lezárt töltési rekord adatai
     
     # Vezérlési paraméterek (config.json-ból töltve)
     "start_soc": 100,
@@ -358,6 +369,7 @@ def load_config():
         shared_state["force_submode"] = config.get("force_submode", "manual_stop")
         shared_state["schedule_solar_auto"] = bool(config.get("schedule_solar_auto", False))
         shared_state["web_auth_enabled"] = bool(config.get("web_auth_enabled", True))
+        shared_state["started_by_controller"] = bool(config.get("started_by_controller", False))
         
         # Győződjünk meg róla, hogy minden napnak van override_auto mezője
         sched = config.get("forced_schedule", DEFAULT_CONFIG["forced_schedule"])
@@ -413,8 +425,18 @@ def load_config():
     except Exception as e:
         charger_password = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
         print(f"Hiba a jelszó feldolgozásakor: {e}. Alapértelmezett jelszó használata.")
+        
+    global _last_initiated_session_id
+    shared_state["last_charge"] = config.get("last_charge", {})
+    _last_initiated_session_id = config.get("last_initiated_session_id", "")
+    
+    # Új hozzáadott állapotok betöltése a konfigurációból
+    shared_state["session_energy_accumulator"] = float(config.get("session_energy_accumulator", 0.0))
+    shared_state["session_last_time"] = float(config.get("session_last_time", 0.0))
+    shared_state["session_last_power"] = float(config.get("session_last_power", 0.0))
 
 def save_config_file():
+    global _last_initiated_session_id
     with state_lock:
         try:
             # Megpróbáljuk visszaalakítani olvasható szöveggé (pl. PIN kód)
@@ -449,7 +471,13 @@ def save_config_file():
             "auto_enabled": shared_state["auto_enabled"],
             "schedule_enabled": shared_state["schedule_enabled"],
             "web_auth_enabled": WEB_AUTH_ENABLED,
-            "web_password": WEB_PASSWORD
+            "web_password": WEB_PASSWORD,
+            "started_by_controller": shared_state.get("started_by_controller", False),
+            "last_charge": shared_state.get("last_charge", {}),
+            "last_initiated_session_id": _last_initiated_session_id,
+            "session_energy_accumulator": shared_state.get("session_energy_accumulator", 0.0),
+            "session_last_time": shared_state.get("session_last_time", 0.0),
+            "session_last_power": shared_state.get("session_last_power", 0.0)
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -493,6 +521,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             margin: 0;
             padding: 0;
             font-family: 'Outfit', sans-serif;
+        }
+
+        .mobile-only-break, .show-mobile {
+            display: none;
         }
 
         html, body {
@@ -1363,6 +1395,36 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 grid-template-columns: 1fr;
                 padding: 0.4rem;
             }
+            .mobile-only-break {
+                display: inline !important;
+            }
+            .hide-mobile {
+                display: none !important;
+            }
+            .show-mobile {
+                display: inline !important;
+            }
+            #active-charging-view {
+                flex-wrap: nowrap !important;
+                gap: 0.5rem !important;
+            }
+            #active-charging-view > div:first-child {
+                flex: 1.4 !important;
+                min-width: 0 !important;
+                max-width: none !important;
+            }
+            #active-charging-view > div:last-child {
+                flex: 0.6 !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                padding: 0.5rem 0.3rem !important;
+            }
+            #charging-power-val {
+                font-size: 1.4rem !important;
+            }
+            .console-box {
+                height: 360px !important;
+            }
             header {
                 position: sticky;
                 top: 0;
@@ -1637,12 +1699,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 Hálózati fogyasztás küszöbérték (W)
                                 <span class="tooltip-container">ⓘ<span class="tooltip-text">A hálózatból vételezett (importált) áram azon szintje, ami felett a leállítási időzítő elindul. A 0 W kikapcsolja ezt a korlátot.</span></span>
                             </label>
-                            <input type="number" id="auto_stop_import_limit" min="0" max="10000" step="100" oninput="updateInputStatus('auto_stop_import_limit')">
+                            <input type="number" id="auto_stop_import_limit" min="0" max="10000" step="1" oninput="updateInputStatus('auto_stop_import_limit')">
                         </div>
                         <div class="input-group">
                             <label for="auto_grid_charge_duration_minutes" style="display: inline-flex; align-items: center;">
                                 Hálózati töltés késleltetett leállítása (perc)
-                                <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha a hálózati fogyasztás meghaladja a küszöbértéket, ennyi ideig engedi még a töltést futni. A 0 perc kikapcsolja a hálózati leállítást.</span></span>
+                                <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha a hálózati fogyasztás meghaladja a küszöbértéket, ennyi ideig engedi még a töltést futni. A 0 perc azonnali leállítást jelent.</span></span>
                             </label>
                             <input type="number" id="auto_grid_charge_duration_minutes" min="0" max="1440" oninput="updateInputStatus('auto_grid_charge_duration_minutes')">
                         </div>
@@ -1651,7 +1713,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 Ház UPS (inverter) túlterhelés-védelem (W)
                                 <span class="tooltip-container">ⓘ<span class="tooltip-text">Az inverter UPS kimenetén mérhető maximális fogyasztás. Ha a ház egyéb fogyasztói miatt a terhelés ezen érték fölé ugrik, a töltés leáll az inverter védelmében. A 0 kikapcsolja a védelmet.</span></span>
                             </label>
-                            <input type="number" id="auto_house_power_limit_w" min="0" max="20000" step="100">
+                            <input type="number" id="auto_house_power_limit_w" min="0" max="20000" step="1">
                         </div>
                         <div class="checkbox-group" onclick="togglePersistCheckbox()" style="grid-column: span 2; margin-bottom: 0.5rem;">
                             <input type="checkbox" id="auto_persist_mode_on_restart" style="cursor:pointer;">
@@ -1800,7 +1862,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
 
             <div>
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: stretch; margin-bottom: 0.8rem;">
+                <!-- AKTÍV TÖLTÉS NÉZET -->
+                <div id="active-charging-view" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: stretch; margin-bottom: 0.8rem;">
                     <div style="flex: 1.5; min-width: 280px; max-width: 450px;">
                         <table class="phase-table" style="width: 100%;">
                             <thead>
@@ -1808,7 +1871,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                     <th>Fázis</th>
                                     <th>Feszültség</th>
                                     <th>
-                                        Mért töltőáram (Visszacsatolás)
+                                        Mért töltőáram <span class="hide-mobile">(Visszacsatolás)</span>
                                         <span class="tooltip-container">ⓘ<span class="tooltip-text">A töltőkábelen (fázisonként) ténylegesen átfolyó áramerősség élő visszacsatolása az autótöltőtől.</span></span>
                                     </th>
                                 </tr>
@@ -1833,34 +1896,89 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </table>
                     </div>
                     <div style="flex: 1; min-width: 200px; max-width: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; box-sizing: border-box;">
-                        <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; text-align: center;">
-                            Töltési teljesítmény
-                            <span class="tooltip-container">ⓘ<span class="tooltip-text">A három fázis pillanatnyi teljesítményének összege kilowattban (kW).</span></span>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; text-align: center; line-height: 1.2;">
+                            <span class="charging-power-title-line">Töltési</span><br class="mobile-only-break">
+                            <span class="charging-power-title-line">teljesítmény
+                                <span class="tooltip-container">ⓘ<span class="tooltip-text">A három fázis pillanatnyi teljesítményének összege kilowattban (kW).</span></span>
+                            </span>
                         </div>
                         <div id="charging-power-val" style="font-size: 2.2rem; font-weight: 700; color: var(--primary);">0.00 kW</div>
+                    </div>
+                </div>
+
+                <!-- UTOLSÓ TÖLTÉS ÖSSZESÍTŐ NÉZET -->
+                <div id="last-charge-summary-view" style="display: none; gap: 1rem; flex-wrap: wrap; align-items: stretch; margin-bottom: 0.8rem;">
+                    <!-- Feszültség táblázat (mindig látható feszültségek) -->
+                    <div style="flex: 1; min-width: 150px; max-width: 220px;">
+                        <table class="phase-table" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Fázis</th>
+                                    <th>Feszültség</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>L1</td>
+                                    <td id="v1-inactive">0.0 V</td>
+                                </tr>
+                                <tr>
+                                    <td>L2</td>
+                                    <td id="v2-inactive">0.0 V</td>
+                                </tr>
+                                <tr>
+                                    <td>L3</td>
+                                    <td id="v3-inactive">0.0 V</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Legutóbbi töltés összesítése -->
+                    <div style="flex: 2; min-width: 280px; display: flex; flex-direction: column; justify-content: center; padding: 1rem; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; box-sizing: border-box;">
+                        <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.4rem;">
+                            Legutóbbi saját töltés összesítése
+                        </div>
+                        <table style="width: 100%; font-size: 0.9rem; border-collapse: collapse;">
+                            <tr>
+                                <td style="padding: 0.3rem 0; color: var(--text-muted);">Indítás ideje:</td>
+                                <td id="last-charge-start" style="padding: 0.3rem 0; font-weight: 600; text-align: right;">-</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 0.3rem 0; color: var(--text-muted);">Időtartam:</td>
+                                <td id="last-charge-duration" style="padding: 0.3rem 0; font-weight: 600; text-align: right;">-</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 0.3rem 0; color: var(--text-muted);">Betöltött energia:</td>
+                                <td id="last-charge-energy" style="padding: 0.3rem 0; font-weight: 600; text-align: right; color: var(--success);">-</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 0.3rem 0; color: var(--text-muted);">Leállítás oka:</td>
+                                <td id="last-charge-reason" style="padding: 0.3rem 0; font-weight: 600; text-align: right;">-</td>
+                            </tr>
+                        </table>
                     </div>
                 </div>
                 <div style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted);">
                     <div style="display: flex; justify-content: space-between;">
                         <div>
-                            Töltési energia összesen:
+                            <span class="hide-mobile">Töltési energia összesen</span><span class="show-mobile">Összes energia</span>:
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">Az aktuális vagy legutóbbi töltési ciklus során az autóba töltött összes energiamennyiség kilowattórában.</span></span>
                             <span id="energy-total" style="color: var(--text-color); font-weight: 600; margin-left: 0.2rem;">0.00 kWh</span>
                         </div>
                         <div>
-                            Töltő belső hőmérséklet:
+                            <span class="hide-mobile">Töltő belső hőmérséklet</span><span class="show-mobile">Belső hőfok</span>:
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">A BESEN autótöltő burkolatán belüli elektronika hőmérséklete.</span></span>
                             <span id="temp-internal" style="color: var(--text-color); font-weight: 600; margin-left: 0.2rem;">0.0 °C</span>
                         </div>
                     </div>
                     <div style="display: flex; justify-content: space-between; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.4rem; margin-top: 0.2rem;">
                         <div>
-                            Töltő kapcsolata (BLE):
+                            <span class="hide-mobile">Töltő kapcsolata (BLE)</span><span class="show-mobile">Kapcsolat (BLE)</span>:
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">A vezérlő szoftver és az autótöltő közötti Bluetooth (BLE) kapcsolat élő állapota (Csatlakoztatva / Nincs csatlakoztatva).</span></span>
                             <span id="charger-connection-status" style="font-weight: 600; margin-left: 0.2rem;">Betöltés...</span>
                         </div>
                         <div>
-                            Kábel & Töltés állapota:
+                            <span class="hide-mobile">Kábel & Töltés állapota</span><span class="show-mobile">Állapot</span>:
                             <span class="tooltip-container">ⓘ<span class="tooltip-text">A fizikai csatlakozó és a töltési folyamat élő állapota (pl. Kábel kihúzva, Készenlét, Töltés aktív).</span></span>
                             <span id="plug-status-inline" style="font-weight: 600; margin-left: 0.2rem;">Betöltés...</span>
                         </div>
@@ -2588,6 +2706,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById('v3').innerText = data.voltages[2].toFixed(1) + ' V';
                 document.getElementById('i3').innerText = data.currents[2].toFixed(2) + ' A';
 
+                const v1Inactive = document.getElementById('v1-inactive');
+                if (v1Inactive) v1Inactive.innerText = data.voltages[0].toFixed(1) + ' V';
+                const v2Inactive = document.getElementById('v2-inactive');
+                if (v2Inactive) v2Inactive.innerText = data.voltages[1].toFixed(1) + ' V';
+                const v3Inactive = document.getElementById('v3-inactive');
+                if (v3Inactive) v3Inactive.innerText = data.voltages[2].toFixed(1) + ' V';
+
                 // Globális fejléc státusz gombok frissítése
                 const badgeAuto = document.getElementById('badge-toggle-auto');
                 if (badgeAuto) {
@@ -2631,6 +2756,74 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 // Dinamikus UI elemek láthatósági szabályai
                 const isCharging = data.charging_active;
+                
+                const activeView = document.getElementById('active-charging-view');
+                const lastChargeView = document.getElementById('last-charge-summary-view');
+
+                if (isCharging) {
+                    if (activeView) activeView.style.display = 'flex';
+                    if (lastChargeView) lastChargeView.style.display = 'none';
+                } else if (data.last_charge && data.last_charge.session_id) {
+                    if (activeView) activeView.style.display = 'none';
+                    if (lastChargeView) lastChargeView.style.display = 'flex';
+
+                    let startTimeStr = "-";
+                    const sid = data.last_charge.session_id;
+                    if (sid && sid.length >= 12) {
+                        startTimeStr = sid.substring(0, 4) + "-" + sid.substring(4, 6) + "-" + sid.substring(6, 8) + " " + sid.substring(8, 10) + ":" + sid.substring(10, 12);
+                    }
+
+                    let durStr = "-";
+                    const dur = data.last_charge.duration;
+                    if (dur !== undefined) {
+                        const hrs = Math.floor(dur / 3600);
+                        const mins = Math.floor((dur % 3600) / 60);
+                        const secs = dur % 60;
+                        durStr = hrs + "ó " + mins + "p " + secs + "mp";
+                    }
+
+                    let energyStr = "-";
+                    const eng = data.last_charge.energy;
+                    if (eng !== undefined) {
+                        energyStr = (eng / 1000.0).toFixed(2) + ' kWh';
+                    }
+
+                    let reasonStr = data.last_charge.stop_reason || "-";
+                    const reasonMap = {
+                        "soft_stop": "Szoftveresen leállítva",
+                        "ManualStop": "Kézzel leállítva",
+                        "SOCLimitReached": "SOC limit elérve",
+                        "TimeLimitReached": "Időkeret elérve",
+                        "UnderCurrent": "Áramerősség túl alacsony",
+                        "PowerLimitReached": "Fogyasztási limit elérve",
+                        "PlugPulled": "Kábel kihúzva",
+                        "Finished": "Töltés befejeződött",
+                        "Card": "Kártyás leállítás",
+                        "App": "App leállítás",
+                        "Emergency": "Vészleállítás",
+                        "OverTemperature": "Túlmelegedés",
+                        "OverCurrent": "Túláram",
+                        "OverVoltage": "Túlfeszültség",
+                        "UnderVoltage": "Alacsony feszültség",
+                        "GroundFault": "Földelési hiba",
+                        "RelayWeld": "Relé beragadás",
+                        "DiodeFault": "Dióda hiba"
+                    };
+                    if (reasonMap[reasonStr]) reasonStr = reasonMap[reasonStr];
+
+                    const elStart = document.getElementById('last-charge-start');
+                    if (elStart) elStart.innerText = startTimeStr;
+                    const elDur = document.getElementById('last-charge-duration');
+                    if (elDur) elDur.innerText = durStr;
+                    const elEnergy = document.getElementById('last-charge-energy');
+                    if (elEnergy) elEnergy.innerText = energyStr;
+                    const elReason = document.getElementById('last-charge-reason');
+                    if (elReason) elReason.innerText = reasonStr;
+                } else {
+                    if (activeView) activeView.style.display = 'flex';
+                    if (lastChargeView) lastChargeView.style.display = 'none';
+                }
+
                 const forceUnmanagedContainer = document.getElementById('force-unmanaged-container');
                 const forceSliderWrapper = document.getElementById('force-slider-wrapper');
                 const autoSliderWrapper = document.getElementById('auto-slider-wrapper');
@@ -2939,11 +3132,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         async function saveAutoConfig(event) {
             event.preventDefault();
-            const start_soc = parseInt(document.getElementById('auto_start_soc').value);
+            const start_soc = parseInt(document.getElementById('auto_start_soc').value) || 100;
             const stop_soc = parseInt(document.getElementById('auto_stop_soc').value) || 0;
-            const stop_import_limit = parseInt(document.getElementById('auto_stop_import_limit').value);
-            const grid_charge_duration_minutes = parseInt(document.getElementById('auto_grid_charge_duration_minutes').value);
-            const house_power_limit_w = parseInt(document.getElementById('auto_house_power_limit_w').value);
+            const stop_import_limit = parseInt(document.getElementById('auto_stop_import_limit').value) || 0;
+            const grid_charge_duration_minutes = parseInt(document.getElementById('auto_grid_charge_duration_minutes').value) || 0;
+            const house_power_limit_w = parseInt(document.getElementById('auto_house_power_limit_w').value) || 0;
             const persist_mode_on_restart = document.getElementById('auto_persist_mode_on_restart').checked;
             const charger_max_amps = document.getElementById('auto_unmanaged_current').checked ? 0 : parseInt(document.getElementById('auto_charger_max_amps').value);
 
@@ -3284,12 +3477,12 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             try:
                 config_data = json.loads(post_data.decode('utf-8'))
                 with state_lock:
-                    shared_state["start_soc"] = int(config_data["start_soc"])
+                    shared_state["start_soc"] = int(config_data.get("start_soc") or 100)
                     if "stop_soc" in config_data:
-                        shared_state["stop_soc"] = int(config_data["stop_soc"])
-                    shared_state["stop_import_limit"] = int(config_data["stop_import_limit"])
-                    shared_state["grid_charge_duration_minutes"] = int(config_data["grid_charge_duration_minutes"])
-                    shared_state["house_power_limit_w"] = int(config_data["house_power_limit_w"])
+                        shared_state["stop_soc"] = int(config_data.get("stop_soc") or 0)
+                    shared_state["stop_import_limit"] = int(config_data.get("stop_import_limit") or 0)
+                    shared_state["grid_charge_duration_minutes"] = int(config_data.get("grid_charge_duration_minutes") or 0)
+                    shared_state["house_power_limit_w"] = int(config_data.get("house_power_limit_w") or 0)
                     shared_state["persist_mode_on_restart"] = bool(config_data["persist_mode_on_restart"])
                     if "charger_max_amps" in config_data:
                         shared_state["charger_max_amps"] = int(config_data["charger_max_amps"])
@@ -3529,7 +3722,8 @@ def copy_packet_with_new_cmd(packet, new_cmd_id):
 # Aszinkron csomagfeldolgozó és állapotgép
 async def process_assembled_packet(packet, client):
     global charger_serial, charger_password, ble_state, login_acknowledged
-    global last_identity_ack_time, last_login_time, shared_state
+    global last_identity_ack_time, last_login_time, shared_state, _last_initiated_session_id
+    global last_telemetry_time, session_energy_accumulator, _last_save_time
     
     if len(packet) < 21:
         return
@@ -3666,14 +3860,48 @@ async def process_assembled_packet(packet, client):
             login_acknowledged = True
         
     elif cmd_id == 0x000A:
+        global _recently_cleared_sessions
+        current_time = time.time()
+        
+        # Toroljuk a 60 masodpercnel regebbi bejegyzeseket
+        _recently_cleared_sessions = {k: v for k, v in _recently_cleared_sessions.items() if current_time - v < 60}
+        
         payload = packet[21:]
-        if len(payload) >= 17:
+        if len(payload) >= 88:
             try:
-                start_user = payload[1:17].replace(b'\x00', b'').decode('utf-8', errors='replace').strip()
-            except Exception:
-                start_user = "Ismeretlen"
-            log_message(f"-> [STATUS] Töltési rekord érkezett (0x000A) - Felhasználó: {start_user}")
-
+                session_id = payload[33:49].replace(b'\x00', b'').decode('ascii', errors='replace').strip()
+                stop_reason = payload[17:33].replace(b'\x00', b'').decode('ascii', errors='replace').strip()
+                duration = int.from_bytes(payload[72:76], byteorder='big')
+                energy = int.from_bytes(payload[84:88], byteorder='big') * 10
+                user_id = payload[1:17].replace(b'\x00', b'').decode('ascii', errors='replace').strip()
+            except Exception as e:
+                log_message(f"-> [HIBA] 0x000A csomag feldolgozasa kozben hiba tortent: {e}")
+                return
+            
+            if not session_id or not session_id.startswith('20'):
+                return
+            
+            if session_id not in _recently_cleared_sessions or current_time - _recently_cleared_sessions[session_id] > 15:
+                ack_payload = bytearray([0x01]) + payload[33:49] + bytearray([0x01])
+                ack_packet = create_ble_packet(0x800A, bytes(ack_payload))
+                await ble_command_queue.put(ack_packet)
+                
+                _recently_cleared_sessions[session_id] = current_time
+                
+                if session_id == _last_initiated_session_id:
+                    shared_state["last_charge"] = {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "stop_reason": stop_reason,
+                        "duration": duration,
+                        "energy": energy,
+                        "timestamp": current_time
+                    }
+                    save_config_file()
+                    log_message(f"-> [STATUS] 0x800A csomag elkuldve a munkamenet lezarasara (session_id: {session_id}). Mentett adatok: {shared_state['last_charge']}")
+                else:
+                    log_message(f"-> [STATUS] 0x800A csomag elkuldve a munkamenet lezarasara (session_id: {session_id}). (Nem saját szoftveres indítás, nem mentjük.)")
+        
     elif cmd_id in (0x0004, 0x000D):
         if ble_state != "LOGGED_IN":
             ble_state = "LOGGED_IN"
@@ -3690,11 +3918,6 @@ async def process_assembled_packet(packet, client):
             v3 = ((payload[29] << 8) | payload[30]) * 0.1
             i3 = ((payload[31] << 8) | payload[32]) * 0.01
             
-            energy_raw = (payload[9] << 24) | (payload[10] << 16) | (payload[11] << 8) | payload[12]
-            # A BESEN telemetria az L1 fázis energiáját méri. 3-fázisú töltésnél (L2 vagy L3 aktív) 3-as szorzó szükséges.
-            phase_multiplier = 3.0 if (i2 > 0.5 or i3 > 0.5) else 1.0
-            energy_kwh = (energy_raw * 0.01 / 1000.0) * phase_multiplier
-            
             t_val = (payload[13] << 8) | payload[14]
             temp_int = (t_val - 20000) * 0.01 if t_val != 0xFFFF else -1.0
             
@@ -3703,17 +3926,62 @@ async def process_assembled_packet(packet, client):
             is_charging = (output_state == 0x01) or (i1 > 0.1 or i2 > 0.1 or i3 > 0.1)
             is_plug_disconnected = (plug_state == 0x01)
             
-            with state_lock:
-                shared_state["charger_connected"] = True
-                shared_state["pull_plug"] = is_plug_disconnected
-                shared_state["voltages"] = [v1, v2, v3]
-                shared_state["currents"] = [i1, i2, i3]
-                shared_state["energy_total"] = energy_kwh
-                shared_state["temperature_internal"] = temp_int
-                shared_state["charging_active"] = is_charging
-                # Ha nem aktív a töltés, nullázzuk az áramerősség korlátot
-                if not is_charging:
+            current_power = v1 * i1 + v2 * i2 + v3 * i3
+            
+            if is_charging:
+                current_time = time.time()
+                if last_telemetry_time is None:
+                    if shared_state["session_last_time"] > 0:
+                        dt = current_time - shared_state["session_last_time"]
+                        if 0 < dt < 10800:
+                            P_avg = (shared_state["session_last_power"] + current_power) / 2.0
+                            dE_gap = (P_avg * dt) / 3600000.0
+                            session_energy_accumulator = shared_state["session_energy_accumulator"] + dE_gap
+                            log_message(f"-> [STATUS] Újraindítás utáni energiakorrekció: {dE_gap:.4f} kWh a kiesett {dt:.1f} másodpercre (Átlag teljesítmény: {P_avg:.1f} W).")
+                        else:
+                            session_energy_accumulator = shared_state["session_energy_accumulator"]
+                    else:
+                        session_energy_accumulator = shared_state["session_energy_accumulator"]
+                    last_telemetry_time = current_time
+                else:
+                    dt = current_time - last_telemetry_time
+                    if 0 < dt < 30:
+                        dE = (current_power * dt) / 3600000.0
+                        session_energy_accumulator += dE
+                        last_telemetry_time = current_time
+                
+                with state_lock:
+                    shared_state["charger_connected"] = True
+                    shared_state["pull_plug"] = is_plug_disconnected
+                    shared_state["voltages"] = [v1, v2, v3]
+                    shared_state["currents"] = [i1, i2, i3]
+                    shared_state["energy_total"] = session_energy_accumulator
+                    shared_state["temperature_internal"] = temp_int
+                    shared_state["charging_active"] = True
+                    shared_state["session_energy_accumulator"] = session_energy_accumulator
+                    shared_state["session_last_time"] = current_time
+                    shared_state["session_last_power"] = current_power
+                
+                if current_time - _last_save_time >= 60.0:
+                    _last_save_time = current_time
+                    save_config_file()
+            else:
+                session_energy_accumulator = 0.0
+                last_telemetry_time = None
+                with state_lock:
+                    if shared_state["session_energy_accumulator"] > 0 or shared_state["session_last_time"] > 0:
+                        shared_state["energy_total"] = 0.0
+                        shared_state["session_energy_accumulator"] = 0.0
+                        shared_state["session_last_time"] = 0.0
+                        shared_state["session_last_power"] = 0.0
+                    shared_state["charger_connected"] = True
+                    shared_state["pull_plug"] = is_plug_disconnected
+                    shared_state["voltages"] = [0, 0, 0]
+                    shared_state["currents"] = [0.0, 0.0, 0.0]
+                    shared_state["temperature_internal"] = temp_int
+                    shared_state["charging_active"] = False
                     shared_state["active_current_limit"] = 0
+                save_config_file()
 
 # BLE Értesítéskezelő (GATT NOTIFY) callback
 def ble_notification_received(sender, data_bytes):
@@ -4013,22 +4281,27 @@ async def safe_ble_start_notify(client, char, callback, timeout=5.0):
             pass
         raise e
 
+_persistent_inverter = None
+
 def fetch_inverter_data_blocking():
-    # Solarman V5 alapú lekérdezés megnyitása a logger sticks felé
-    inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
+    global _persistent_inverter
+    
+    if _persistent_inverter is None:
+        log_message(f"Deye Inverter kapcsolat felépítése: {INVERTER_IP}:{INVERTER_PORT} (S/N: {LOGGER_SERIAL})...")
+        try:
+            _persistent_inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
+        except Exception as e:
+            log_message(f"Deye Inverter kapcsolat hiba: {e}")
+            raise
+    
     try:
-        # Belső hálózati teljesítmény (Register 607) - Signed Short
-        grid_power_internal = to_signed_16(inverter.read_holding_registers(register_addr=607, quantity=1)[0])
-        # Külső hálózati teljesítmény (Register 619) - Signed Short
-        grid_power_external = to_signed_16(inverter.read_holding_registers(register_addr=619, quantity=1)[0])
-        # Házi Akkumulátor SoC (Register 588) - Unsigned Short
-        battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
-        # UPS terhelés / ház fogyasztás (Register 643) - Unsigned Short
-        ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
-        # Napelem termelés (Register 175) - Unsigned Short
-        pv_power = inverter.read_holding_registers(register_addr=175, quantity=1)[0]
-        # Akkumulátor terhelés (Register 590) - Signed Short
-        battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
+        pv_regs = _persistent_inverter.read_holding_registers(register_addr=672, quantity=2)
+        pv_power = sum(pv_regs)  # PV1 and PV2 power, sum them to get pv_power
+        grid_power_internal = to_signed_16(_persistent_inverter.read_holding_registers(register_addr=607, quantity=1)[0])
+        grid_power_external = to_signed_16(_persistent_inverter.read_holding_registers(register_addr=619, quantity=1)[0])
+        battery_soc = _persistent_inverter.read_holding_registers(register_addr=588, quantity=1)[0]
+        ups_load_power = _persistent_inverter.read_holding_registers(register_addr=643, quantity=1)[0]
+        battery_power = to_signed_16(_persistent_inverter.read_holding_registers(register_addr=590, quantity=1)[0])
         
         # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
         charger_power = max(0, grid_power_external - grid_power_internal)
@@ -4041,11 +4314,14 @@ def fetch_inverter_data_blocking():
             "battery_power": battery_power,
             "charger_power": charger_power
         }
-    finally:
+    except Exception as e:
         try:
-            inverter.disconnect()
+            if _persistent_inverter is not None:
+                _persistent_inverter.disconnect()
         except Exception:
             pass
+        _persistent_inverter = None
+        raise
 
 # Aszinkron Inverter adatlekérdezés task (átdolgozva háttérszálon futó blocking hívásokkal)
 async def run_inverter_polling():
@@ -4080,7 +4356,7 @@ async def run_inverter_polling():
 
 # Aszinkron Fő Döntési és Vezérlő Task
 async def run_charge_controller():
-    global shared_state, ble_command_queue
+    global shared_state, ble_command_queue, _last_initiated_session_id
     
     # Vezérlési segédváltozók
     last_sent_action = None       # "START" vagy "STOP"
@@ -4150,12 +4426,15 @@ async def run_charge_controller():
             manual_start_requested = shared_state.get("manual_start_requested", False)
             restart_pending_start = shared_state.get("restart_pending_start", False)
 
+        # line_id meghatározása áthelyezve a ciklus elejére
+
         # --- ALKALMAZÁSI ÉS ÚJRAINDÍTÁSI FLAGEK FELDOLGOZÁSA (Előrehozva a korai returnök elé) ---
         # 1. Kézi leállítás (Soft Stop)
         if apply_with_stop:
             log_message("[VEZÉRLÉS] Felhasználói árammódosítás leállítással kérték. Töltés LEÁLLÍTÁSA...")
             stop_payload = bytearray(47)
-            stop_payload[0] = 0x01
+            stop_payload[0] = line_id
+            stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
             packet = create_ble_packet(0x8008, bytes(stop_payload))
             await ble_command_queue.put(packet)
             last_sent_action = "STOP"
@@ -4163,13 +4442,16 @@ async def run_charge_controller():
             with state_lock:
                 shared_state["active_current_limit"] = 0
                 shared_state["apply_with_stop"] = False
+                shared_state["started_by_controller"] = False
+            save_config_file()
             continue
 
         # 2. Kézi újraindítás (Alkalmaz gomb Force módban)
         if apply_with_restart:
             log_message("[VEZÉRLÉS] Felhasználói árammódosítás újraindítással kérték. Töltés leállítása, újraindítás 15 mp múlva...")
             stop_payload = bytearray(47)
-            stop_payload[0] = 0x01
+            stop_payload[0] = line_id
+            stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
             packet = create_ble_packet(0x8008, bytes(stop_payload))
             await ble_command_queue.put(packet)
             last_sent_action = "STOP"
@@ -4180,11 +4462,17 @@ async def run_charge_controller():
                 shared_state["cooldown_until"] = cooldown_time
                 shared_state["apply_with_restart"] = False
                 shared_state["restart_pending_start"] = True
+                shared_state["started_by_controller"] = False
+            save_config_file()
             continue
 
         # Ha a töltés nem aktív és nem várunk megerősítésre, engedélyezzük az új parancsokat
         if not charging_active and start_command_time is None:
             last_sent_action = None
+            if shared_state.get("started_by_controller", False):
+                with state_lock:
+                    shared_state["started_by_controller"] = False
+                save_config_file()
             
             # Kézi indítás felülbírálás lecsengése
             if force_submode == "manual_start" and not manual_start_requested:
@@ -4208,6 +4496,10 @@ async def run_charge_controller():
             start_command_time = None
             consecutive_failures = 0
             import_exceeded_since = None
+            if shared_state.get("started_by_controller", False):
+                with state_lock:
+                    shared_state["started_by_controller"] = False
+                save_config_file()
             continue
 
         # Ha a töltő kábele ki van húzva, nem hajtunk végre parancsokat
@@ -4280,7 +4572,7 @@ async def run_charge_controller():
             continue
 
         # Szimulált vagy valós külső indítás kezelése
-        is_external_session = sim_external_session if sim_mode else (last_sent_action != "START")
+        is_external_session = sim_external_session if sim_mode else (not shared_state.get("started_by_controller", False))
 
         # --- INDÍTÁS ELLENŐRZÉSI TIMEOUT LOGIKA ---
         if start_command_time is not None:
@@ -4377,11 +4669,24 @@ async def run_charge_controller():
                         if not charging_active:
                             expected_action = "START" if battery_soc >= start_soc else "KEEP"
                         else:
-                            if is_external_session:
+                            expected_stop = False
+                            if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w):
+                                expected_stop = True
+                            elif (stop_soc > 0 and battery_soc < stop_soc):
+                                expected_stop = True
+                            
+                            if expected_stop:
+                                expected_action = "STOP"
+                            elif is_external_session:
                                 expected_action = "KEEP"
                             else:
-                                if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w) or                                    (grid_charge_duration_minutes > 0 and import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60):
-                                    expected_action = "STOP"
+                                if stop_import_limit > 0 and grid_power > stop_import_limit:
+                                    if grid_charge_duration_minutes == 0:
+                                        expected_action = "STOP"
+                                    elif import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60:
+                                        expected_action = "STOP"
+                                    else:
+                                        expected_action = "KEEP"
                                 else:
                                     expected_action = "KEEP"
                 else: # Időablakon kívül
@@ -4389,11 +4694,24 @@ async def run_charge_controller():
                         if not charging_active:
                             expected_action = "START" if battery_soc >= start_soc else "KEEP"
                         else:
-                            if is_external_session:
+                            expected_stop = False
+                            if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w):
+                                expected_stop = True
+                            elif (stop_soc > 0 and battery_soc < stop_soc):
+                                expected_stop = True
+                            
+                            if expected_stop:
+                                expected_action = "STOP"
+                            elif is_external_session:
                                 expected_action = "KEEP"
                             else:
-                                if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w) or                                    (grid_charge_duration_minutes > 0 and import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60):
-                                    expected_action = "STOP"
+                                if stop_import_limit > 0 and grid_power > stop_import_limit:
+                                    if grid_charge_duration_minutes == 0:
+                                        expected_action = "STOP"
+                                    elif import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60:
+                                        expected_action = "STOP"
+                                    else:
+                                        expected_action = "KEEP"
                                 else:
                                     expected_action = "KEEP"
                     else:
@@ -4405,11 +4723,24 @@ async def run_charge_controller():
                 if not charging_active:
                     expected_action = "START" if battery_soc >= start_soc else "KEEP"
                 else:
-                    if is_external_session:
+                    expected_stop = False
+                    if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w):
+                        expected_stop = True
+                    elif (stop_soc > 0 and battery_soc < stop_soc):
+                        expected_stop = True
+                    
+                    if expected_stop:
+                        expected_action = "STOP"
+                    elif is_external_session:
                         expected_action = "KEEP"
                     else:
-                        if (house_power_limit_w > 0 and ups_load_power > house_power_limit_w) or                            (grid_charge_duration_minutes > 0 and import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60):
-                            expected_action = "STOP"
+                        if stop_import_limit > 0 and grid_power > stop_import_limit:
+                            if grid_charge_duration_minutes == 0:
+                                expected_action = "STOP"
+                            elif import_exceeded_since is not None and current_time - import_exceeded_since >= grid_charge_duration_minutes * 60:
+                                expected_action = "STOP"
+                            else:
+                                expected_action = "KEEP"
                         else:
                             expected_action = "KEEP"
 
@@ -4444,6 +4775,7 @@ async def run_charge_controller():
                 start_payload[0] = line_id
                 start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                 charge_id = time.strftime("%Y%m%d%H%M") + "1337"
+                _last_initiated_session_id = charge_id
                 start_payload[17:33] = charge_id.encode('ascii')
                 start_payload[33] = 0x00
                 ts = get_shanghai_timestamp()
@@ -4463,13 +4795,15 @@ async def run_charge_controller():
                     shared_state["manual_start_requested"] = False
                     shared_state["force_submode"] = "manual_start"
                     shared_state["active_current_limit"] = charger_max_amps
+                    shared_state["started_by_controller"] = True
+                save_config_file()
                 
             elif force_submode == "manual_stop":
                 if charging_active or last_sent_action == "START":
                     log_message("[VEZÉRLÉS] Kényszerített kézi töltés leállítása...")
                     stop_payload = bytearray(47)
-                    stop_payload[0] = 0x01
-                    
+                    stop_payload[0] = line_id
+                    stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                     packet = create_ble_packet(0x8008, bytes(stop_payload))
                     await ble_command_queue.put(packet)
                     
@@ -4477,6 +4811,8 @@ async def run_charge_controller():
                     actual_action = "STOP"
                     with state_lock:
                         shared_state["active_current_limit"] = 0
+                        shared_state["started_by_controller"] = False
+                    save_config_file()
 
         # 2. Ütemezett időablak fix áramkorláttal (Prioritás BE)
         elif mode == "schedule" and in_interval and override_auto:
@@ -4487,6 +4823,7 @@ async def run_charge_controller():
                 start_payload[0] = line_id
                 start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                 charge_id = time.strftime("%Y%m%d%H%M") + "1337"
+                _last_initiated_session_id = charge_id
                 start_payload[17:33] = charge_id.encode('ascii')
                 start_payload[33] = 0x00
                 ts = get_shanghai_timestamp()
@@ -4504,6 +4841,8 @@ async def run_charge_controller():
                 actual_action = "START"
                 with state_lock:
                     shared_state["active_current_limit"] = target_amps
+                    shared_state["started_by_controller"] = True
+                save_config_file()
                     
             elif charging_active and not is_external_session:
                 if target_amps > 0:
@@ -4514,7 +4853,8 @@ async def run_charge_controller():
                     elif active_current_limit != target_amps:
                         log_message(f"[VEZÉRLÉS] Ütemezett áramerősség változás ({active_current_limit}A -> {target_amps}A). Újraindítás...")
                         stop_payload = bytearray(47)
-                        stop_payload[0] = 0x01
+                        stop_payload[0] = line_id
+                        stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                         packet = create_ble_packet(0x8008, bytes(stop_payload))
                         await ble_command_queue.put(packet)
                         
@@ -4525,6 +4865,8 @@ async def run_charge_controller():
                         with state_lock:
                             shared_state["active_current_limit"] = 0
                             shared_state["cooldown_until"] = cooldown_time
+                            shared_state["started_by_controller"] = False
+                        save_config_file()
 
         # 3. Összevont Solar Auto szabályok
         elif use_solar_auto_rules:
@@ -4538,6 +4880,7 @@ async def run_charge_controller():
                     start_payload[0] = line_id
                     start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                     charge_id = time.strftime("%Y%m%d%H%M") + "1337"
+                    _last_initiated_session_id = charge_id
                     start_payload[17:33] = charge_id.encode('ascii')
                     start_payload[33] = 0x00
                     ts = get_shanghai_timestamp()
@@ -4556,42 +4899,50 @@ async def run_charge_controller():
                     actual_action = "START"
                     with state_lock:
                         shared_state["active_current_limit"] = charger_max_amps
+                        shared_state["started_by_controller"] = True
+                    save_config_file()
                         
-            # --- LEÁLLÍTÁSI FELTÉTELEK (csak ha nem külső session) ---
-            elif charging_active and not is_external_session:
+            # --- LEÁLLÍTÁSI FELTÉTELEK ---
+            elif charging_active:
                 should_stop = False
                 reason = ""
                 
+                # BIZTONSÁGI LEÁLLÍTÁSOK (minden aktív töltésre kikényszerítjük, akár külső indítású is!)
                 # 1. szabály: Ház túlterhelés-védelem (Deye UPS port terhelés alapján)
                 if house_power_limit_w > 0 and ups_load_power > house_power_limit_w:
                     should_stop = True
                     reason = f"Ház UPS terhelése ({ups_load_power} W) meghaladta a korlátot ({house_power_limit_w} W)"
                 
-                # 2. szabály: Opcionális Akkumulátor leállítási szint korlát
-                elif stop_soc > 0 and battery_soc < stop_soc:
+                # 2. szabály: Opcionális Akkumulátor leállítási szint korlát (stop_soc)
+                if not should_stop and stop_soc > 0 and battery_soc < stop_soc:
                     should_stop = True
                     reason = f"Akku töltöttsége ({battery_soc}%) a leállítási küszöb ({stop_soc}%) alá esett"
                 
-                # 3. szabály: Hálózati töltés időtartama leállítás előtt
-                elif grid_charge_duration_minutes > 0:
-                    if grid_power > stop_import_limit:
-                        if import_exceeded_since is None:
-                            import_exceeded_since = current_time
-                            log_message(f"[VEZÉRLÉS] Hálózati terhelés ({grid_power} W) meghaladta a limitet ({stop_import_limit} W). Hálózati töltés időzítő elindítva ({grid_charge_duration_minutes} perc)...")
-                        elif current_time - import_exceeded_since >= grid_charge_duration_minutes * 60:
-                            should_stop = True
-                            reason = f"Hálózati töltési időkorlát ({grid_charge_duration_minutes} perc) letelt"
-                    else:
-                        if import_exceeded_since is not None:
-                            import_exceeded_since = None
-                            log_message("[VEZÉRLÉS] Hálózati terhelés visszaesett a limit alá. Időzítő törölve.")
+                # NORMÁL NAPELEM/HÁLÓZAT SZABÁLYOK (csak ha nem külső indítású a töltés)
+                if not should_stop and not is_external_session:
+                    # 3. szabály: Hálózati töltés időtartama leállítás előtt
+                    if stop_import_limit > 0:
+                        if grid_power > stop_import_limit:
+                            if grid_charge_duration_minutes == 0:
+                                should_stop = True
+                                reason = f"Hálózati import terhelés ({grid_power} W) meghaladta a limitet ({stop_import_limit} W) azonnali leállítással"
+                            elif import_exceeded_since is None:
+                                import_exceeded_since = current_time
+                                log_message(f"[VEZÉRLÉS] Hálózati terhelés ({grid_power} W) meghaladta a limitet ({stop_import_limit} W). Hálózati töltés időzítő elindítva ({grid_charge_duration_minutes} perc)...")
+                            elif current_time - import_exceeded_since >= grid_charge_duration_minutes * 60:
+                                should_stop = True
+                                reason = f"Hálózati töltési időkorlát ({grid_charge_duration_minutes} perc) letelt"
+                        else:
+                            if import_exceeded_since is not None:
+                                import_exceeded_since = None
+                                log_message("[VEZÉRLÉS] Hálózati terhelés visszaesett a limit alá. Időzítő törölve.")
                 
                 if should_stop:
                     log_message(f"[VEZÉRLÉS] Solar Auto leállítási ok teljesült: {reason}. Töltés LEÁLLÍTÁSA...")
                     
                     stop_payload = bytearray(47)
-                    stop_payload[0] = 0x01
-                    
+                    stop_payload[0] = line_id
+                    stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                     packet = create_ble_packet(0x8008, bytes(stop_payload))
                     await ble_command_queue.put(packet)
                     
@@ -4600,13 +4951,16 @@ async def run_charge_controller():
                     import_exceeded_since = None
                     with state_lock:
                         shared_state["active_current_limit"] = 0
+                        shared_state["started_by_controller"] = False
+                    save_config_file()
 
         # 4. Időablakon kívül, Solar Auto nélkül -> Töltés leállítása
         else:
             if (charging_active or last_sent_action == "START") and not is_external_session:
                 log_message("[VEZÉRLÉS] Ütemezési időablakon kívül vagyunk (Solar Auto KI). Töltés LEÁLLÍTÁSA...")
                 stop_payload = bytearray(47)
-                stop_payload[0] = 0x01
+                stop_payload[0] = line_id
+                stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                 packet = create_ble_packet(0x8008, bytes(stop_payload))
                 await ble_command_queue.put(packet)
                 
@@ -4614,6 +4968,8 @@ async def run_charge_controller():
                 actual_action = "STOP"
                 with state_lock:
                     shared_state["active_current_limit"] = 0
+                    shared_state["started_by_controller"] = False
+                save_config_file()
 
         # --- SZABÁLYELLENŐRZÉS KIÉRTÉKELÉSE ---
         if sim_mode:
@@ -4663,6 +5019,7 @@ async def run_simulation_telemetry():
                     else:
                         shared_state["voltages"] = [231.5, 230.8, 232.0]
                         shared_state["currents"] = [0.0, 0.0, 0.0]
+                        shared_state["energy_total"] = 0.0
                         shared_state["temperature_internal"] = 24.2
                 else:
                     shared_state["voltages"] = [0.0, 0.0, 0.0]
