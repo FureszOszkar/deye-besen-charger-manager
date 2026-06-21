@@ -1,8 +1,3 @@
-Created At: 2026-06-19T23:19:05Z
-Completed At: 2026-06-19T23:19:05Z
-File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/README_EN.md`
-Total Lines: 217
-Total Bytes: 21196
 # Deye & BESEN Integrated Charger Controller System
 ## System Documentation and User Manual
 

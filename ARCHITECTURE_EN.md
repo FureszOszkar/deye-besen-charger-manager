@@ -1,8 +1,3 @@
-Created At: 2026-06-21T15:38:35Z
-Completed At: 2026-06-21T15:38:35Z
-File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/ARCHITECTURE_EN.md`
-Total Lines: 242
-Total Bytes: 21520
 # Deye & BESEN Controller – Architecture and Code Structure Documentation
 
 This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `deye_besen_controller.py` software for developers.

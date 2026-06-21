@@ -1,8 +1,3 @@
-Created At: 2026-06-19T23:19:03Z
-Completed At: 2026-06-19T23:19:03Z
-File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/README.md`
-Total Lines: 220
-Total Bytes: 25095
 # Deye & BESEN Integrált Töltésvezérlő Rendszer
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 

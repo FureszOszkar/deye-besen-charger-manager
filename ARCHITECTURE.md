@@ -1,8 +1,3 @@
-Created At: 2026-06-21T15:38:32Z
-Completed At: 2026-06-21T15:38:32Z
-File Path: `file:///f:/Antigravity%20projektek/Aut%C3%B3%20t%C3%B6lt%C5%91%20vez%C3%A9rl%C5%91-Android/ARCHITECTURE.md`
-Total Lines: 241
-Total Bytes: 24232
 # Deye & BESEN Vezérlő – Architektúra és Kódstruktúra Leírás
 
 Ez a dokumentum a `deye_besen_controller.py` szoftver belső felépítését, szálkezelési modelljét, adatfolyamát és a BESEN Bluetooth Low Energy (BLE) protokoll működését részletezi fejlesztők számára.
