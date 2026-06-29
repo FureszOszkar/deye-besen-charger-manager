@@ -1,12 +1,12 @@
 # Deye & BESEN Controller – Architecture and Code Structure Documentation
 
-This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `deye_besen_controller.py` software for developers.
+This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `main.py (along with its modules)` software for developers.
 
 ---
 
 ## 1. System Architecture and Threading Model
 
-The application is fully self-contained in a single Python file, managing concurrent hardware polling, background safety logic, and the HTTP dashboard server.
+The application is fully self-contained in a multi-module Python structure, managing concurrent hardware polling, background safety logic, and the HTTP dashboard server.
 
 The core loops run inside an **asynchronous event loop (Python `asyncio`)**, while the Web Dashboard and API are served from a separate background thread to guarantee non-blocking processing.
 
@@ -235,3 +235,13 @@ To interface with an inverter other than Deye (e.g., Fronius, Huawei, Victron):
 To control a charger other than BESEN (e.g., Go-e, Tesla Wall Connector, Shelly relays):
 1. In `run_ble_client()`, replace the BLE Bleak client with your charger's native API client (e.g., HTTP REST calls, local TCP sockets, or MQTT messages).
 2. At the end of the `run_charge_controller()` evaluation, instead of pushing a packet to `ble_command_queue`, trigger your charger's start/stop or current-limit commands directly.
+
+### 4.4 Advanced Safety: Cooldown and Lockdown
+To protect the charger from rapid state switching (flapping) and infinite start/stop loops:
+1. **Cooldown (20s window):** A sliding 20-second window allows a maximum of 2 state transitions.
+2. **Lockdown (40s window):** If 4 state transitions occur within a 40-second window, the system enters a Lockdown mode on the 5th attempt.
+3. **Infinite Auto-Loop Protection:** If the system executes 10 consecutive automated start/stop commands without user interaction, it forces a STOP and enters Lockdown mode.
+4. **Hard Stop Override:** The manual 'Hard STOP' command from the dashboard always bypasses Cooldown and Lockdown constraints for safety reasons.
+
+### 4.5 Improved House Overload Protection
+The home overload protection logic calculates the total load as (UPS Load + Charger Load). If this sum exceeds the house_power_limit_w configuration, the charger is immediately stopped. This safety stop always bypasses Cooldown and Lockdown delays.

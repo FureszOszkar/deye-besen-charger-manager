@@ -200,3 +200,8 @@ The software recently had the following changes implemented:
 3. HTML input step values for Watt parameters have been changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
 
 If you encounter any logical bugs, unexpected behavior, or malfunctions during use, please **report them in the GitHub Issues section of this repository** so we can fix them! Thank you very much for your feedback!
+
+### Advanced Safety Mechanisms
+- **Anti-Flapping Cooldown:** Prevents rapid start/stop cycling by enforcing a 20-second cooldown window after 2 consecutive state changes.
+- **Safety Lockdown:** Completely locks the system if 5 state transitions occur within 40 seconds, or if 10 consecutive automated commands run without user input. Requires manual unlock from the dashboard.
+- **Total House Load Protection:** Overload safety evaluates (UPS Load + Charger Load) to protect the main breakers. Overload and manual Hard STOP commands always bypass the cooldown/lockdown constraints.

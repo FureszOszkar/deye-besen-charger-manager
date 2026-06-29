@@ -1,0 +1,110 @@
+# Deye & BESEN Integrált Töltővezérlő Rendszer
+## Rendszerdokumentáció és Felhasználói Kézikönyv
+
+Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
+
+---
+
+## 1. Hardver modellek és specifikációk
+
+Ezt a szoftvert a következő hardverkörnyezetben fejlesztették és tesztelték:
+
+*   **Hibrid Inverter:** **Deye 5 kW Hibrid Inverter** (pl. SUN-5K-SG sorozat, 5 kW maximális névleges teljesítmény)
+    *   **Kommunikációs interfész:** Solarman LSW-3 Wi-Fi Logger (Modbus RTU over TCP protokoll a `8899`-es porton).
+*   **Autótöltő (EVSE):** **BESEN BS20-APP-3P16A** (3 fázisú, max 16A / 11 kW okos autótöltő)
+    *   **Kommunikációs interfész:** Bluetooth Low Energy (BLE) kapcsolat.
+*   **Otthoni Akkumulátor:** Kisfeszültségű (48V) Lítium-Vas-Foszfát (LiFePO4 / LFP) akkupakk (pl. 20-30 kWh kapacitás) az inverterhez csatlakoztatva.
+
+---
+
+## 2. Speciális Helyi Fizikai Feltételek és Követelmények
+
+A Bluetooth Low Energy (BLE) és a helyi Wi-Fi hálózat stabilitása kritikus fontosságú a rendszer folyamatos, felügyelet nélküli működéséhez. A következő speciális hardver feltételeknek kell teljesülniük:
+
+### A) Nagy nyereségű USB Bluetooth (BT) Antenna / Adapter
+A BESEN töltő alapértelmezett Bluetooth chipjének hatótávolsága korlátozott. A vezérlő szoftvert futtató számítógépnek **rendelkeznie kell egy külső USB Bluetooth 5.0 (vagy újabb) adapterrel, amely nagy nyereségű antennával van felszerelve** (a rendszert sikeresen tesztelték a **Mercusys MA550H Long Range Bluetooth 5.4** adapterrel). A beépített alaplapi Bluetooth chipek vagy apró USB dongle-k nem képesek stabil kapcsolatot fenntartani az épületen kívül elhelyezett autótöltővel.
+
+- **Megjegyzés az időbélyegekről:** A BESEN töltő MCU-ja ellenőrzi a Unix időbélyeget a START parancsban az időszinkronizációhoz. Ha jelentős eltérés van (pl. Budapest vs. Sanghaj), elutasíthatja a csomagot. Ennek kezelésére a `get_shanghai_timestamp()` függvény a helyi időt Unix időbélyeggé alakítja 8 órás eltolással (Sanghaj időzóna). Ezt a módosított időbélyeget használják a START parancsokban.
+
+### Alternatív megoldás: Mikroszámítógép (pl. Raspberry Pi) a töltő közelében
+Ha a vezérlőt futtató fő számítógép túl messze van, egy rendkívül hatékony alternatíva a drága, nagy hatótávolságú antenna helyett egy olcsó, Wi-Fi és Bluetooth képes mikroszámítógép (pl. **Raspberry Pi Zero 2 W, Raspberry Pi 3, 4 vagy 5**) elhelyezése a töltő közelében (pl. a garázsban).
+
+---
+
+## 3. Telepítés és Futtatás (Windows)
+
+A szoftver Python-ban íródott, és Python forráskódként, vagy PyInstaller-rel egyetlen végrehajtható fájllá (EXE) fordítva futtatható Windows rendszereken.
+
+### Futtatás Python forrásból
+1. Telepítsd a Python 3.9+ verziót.
+2. Telepítsd a szükséges csomagokat: `pip install bleak`
+3. Futtasd a fő szkriptet: `python main.py`
+
+### Futtatás független EXE-ként
+1. Használd a mellékelt `deye_besen_controller.exe` fájlt. Nincs szükség telepítésre vagy Python környezetre.
+2. Csak kattints duplán az indításhoz. A program megnyit egy parancssori ablakot a naplókhoz, és elindítja a háttérszolgáltatásokat.
+
+### A Vezérlőpult (Dashboard) elérése
+Indítás után a webes felület elérhető a helyi hálózaton keresztül.
+*   **URL:** `http://localhost:8000` (vagy a gép helyi IP címe, pl. `http://192.16.8.1.100:8000`)
+*   **Alapértelmezett Jelszó:** `admin` (Ezt a kód jelszavában, vagy szükség esetén a konfigurációban lehet megváltoztatni)
+
+---
+
+## 4. Működési Módok
+
+A szoftver három fő vezérlési módot kínál, amelyeket a webes felületen lehet kiválasztani:
+
+### 1. Napelemes (Solar) Auto Mód
+Ez a teljesen autonóm, "állítsd be és felejtsd el" mód. A vezérlő folyamatosan figyeli a Deye invertert és az akkumulátor szintet.
+*   **Indítási feltétel:** Ha az otthoni akkumulátor állapota (SoC) eléri az *Indítási SoC küszöböt* (pl. 95%), és a napelemes termelés elegendő.
+*   **Leállítási feltételek:**
+    *   Ha a ház áramfogyasztása túl magasra nők (Túlterhelés védelem).
+    *   Ha az otthoni akkumulátor lemerül a megadott *Leállítási SoC küszöb* alá (pl. 50%).
+*   **Dinamikus Áramszabályozás (Load Balancing):** A szoftver automatikusan beállítja a töltő áramerősségét (Amper) a rendelkezésre álló napelemes többlet, az akkumulátor töltési/kisütési korlátai és az Inverter maximális teljesítménye alapján, hogy soha ne húzzon indokolatlanul a hálózatból, miközben maximalizálja a napelem hasznosítását.
+
+### 2. Ütemezett (Scheduled) Mód
+Lehetővé teszi az olcsó éjszakai áramtarifák vagy meghatározott töltési ablakok kihasználását.
+*   **Időablak:** Megadhatsz egy Kezdési (pl. 23:00) és egy Befejezési időt (pl. 06:00).
+*   **Fix áramerősség:** A töltő egy állandó, előre beállított Amper értékkel (pl. 16A) fog tölteni az időablak alatt.
+*   **Napelemes felülbírálat (Opcionális):** Ha az időablakon *kívül* vagyunk, a szoftver visszaállhat a normál Solar Auto viselkedésre, így nappal is tölthetsz napelemről.
+*   **Fix Áram felülbírálata:** Opcionálisan engedélyezheted a dinamikus (auto) áramszabályozást az éjszakai ablak alatt is, bár általában fix maximummal töltünk hálózatról.
+
+### 3. Kézi Kényszerített (Force) Mód
+Ezzel a móddal felülbírálhatsz minden automatizációt, és manuálisan adhatsz ki Start/Stop parancsokat, és állíthatod be az Amper értéket a csúszkával, akár a gyári applikációban.
+*   A "Force Charge" gomb megnyomásával azonnal elindul a töltés a megadott Amperrel (figyelmen kívül hagyva a napelemet és az akkut).
+*   A "Hard Stop" gombbal azonnal leállíthatod a töltést.
+*   **Figyelem:** Kényszerített módban a rendszer a Ház Túlterhelés Védelmét is figyelmen kívül hagyhatja (kivéve, ha az extra biztonsági funkciókba beleütközik).
+
+---
+
+### Fejlett Biztonsági Mechanizmusok
+- **Anti-Flapping Cooldown (Várakozási idő):** Megakadályozza a gyors Start/Stop ciklusokat egy 20 másodperces várakozási idő kikényszerítésével 2 egymást követő állapotváltozás után.
+- **Biztonsági Zárolás (Lockdown):** Teljesen zárolja a rendszert, ha 40 másodpercen belül 5 állapotváltozás történik, vagy ha 10 egymást követő automatikus parancs fut le emberi beavatkozás nélkül. A műszerfalról (dashboard) manuális feloldást (Unlock) igényel.
+- **Teljes Ház Terhelésvédelem:** A túlterhelés védelem a `(UPS Terhelés + Töltő Terhelés)` összegét értékeli ki a főmegszakítók védelme érdekében. A túlterhelésből fakadó leállítások és a manuális Hard STOP parancsok mindig megkerülik a cooldown/lockdown korlátozásokat.
+
+---
+
+## 5. Konfiguráció és Megmaradó Állapot (Persistence)
+
+A beállítások automatikusan mentésre kerülnek egy helyi `config.json` fájlba. Ha újraindítod a szoftvert (vagy a számítógépet), az automatikusan visszatölti az utolsó beállításokat.
+
+A műszerfal (Dashboard) a következő beállításokat biztosítja:
+*   **Indítási SoC (%)** - Amikor eléri, indul a Solar Auto töltés.
+*   **Leállítási SoC (%)** - Amikor alá esik, megáll a Solar Auto töltés.
+*   **Ház Túlterhelés-védelem (W)** - Ha a Deye UPS terhelése meghaladja ezt (pl. 3000W), a töltés biztonsági okokból leáll.
+*   **Max Hálózati Import (W)** - Hálózati türelem-határ. Ha efelett húzunk a hálózatról, leáll a töltés.
+*   **Hálózati Import Időkorlát (Perc)** - Mennyi ideig tolerálja a rendszer a fenti hálózati import túllépést, mielőtt leállítaná a töltést (pl. 5 perc, hogy a felhőátvonulásokat átvészelje).
+*   **Üzemmód Megjegyzése Újraindításkor** - Kapcsoló, amivel a vezérlő emlékszik a legutóbb használt módra (Auto/Schedule/Force).
+
+---
+
+## 6. Hibakeresés és Biztonság
+
+A műszerfalon található egy beépített "Konzol" és "Hibadobozok", amelyek valós idejű visszajelzést adnak:
+*   **Sárga Figyelmeztetés:** Lehűlési (Cooldown) időzítő aktív (megakadályozza, hogy a Bluetooth parancsok túl gyorsan spammeljék a töltőt).
+*   **Piros Hiba:** Kapcsolódási problémák az Inverterrel (Modbus) vagy a Töltővel (BLE).
+*   **Piros Lockdown:** A biztonsági zárolás (Flapping védelem) aktiválódott, kézi feloldás szükséges.
+*   **Konzol kimenet:** Részletes hálózati és töltési eseményeket naplóz.
+
+**Biztonsági Jegyzet:** Ez a szoftver hálózati szinten (Modbus/BLE) lép kapcsolatba a hardverrel. Bár beépített biztonsági limitekkel rendelkezik (pl. Deye MAX áram korlátok), a konfigurációk (például a ház túlterhelés határának) beállításakor a helyi hálózat fizikai teherbírását figyelembe kell venni! Használd saját felelősségre.
