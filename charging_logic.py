@@ -526,6 +526,7 @@ async def run_charge_controller():
             charger_ok = shared_state["charger_connected"]
             grid_power = shared_state["grid_power"]
             ups_load_power = shared_state["ups_load_power"]
+            charger_power = shared_state["charger_power"]
             battery_soc = shared_state["battery_soc"]
             charging_active = shared_state["charging_active"]
             pull_plug = shared_state["pull_plug"]
@@ -953,6 +954,16 @@ async def run_charge_controller():
                     with state_lock:
                         shared_state["active_current_limit"] = 0
                         shared_state["started_by_controller"] = False
+                    save_config_file()
+                else:
+                    # Már nem aktív a töltés, törölhetjük a manual_stop állapotot
+                    # Mivel a /api/force_submode már kikapcsolta az automatikus módokat, a rendszer "monitoring"-ra vált
+                    if shared_state.get("started_by_controller", False):
+                        with state_lock:
+                            shared_state["started_by_controller"] = False
+                    log_message("[VEZÉRLÉS] A kézi leállítás befejeződött. Felülbírálás törölve, rendszer átvált figyelő (monitoring) módba.")
+                    with state_lock:
+                        shared_state["force_submode"] = "schedule"
                     save_config_file()
 
         # 2. Ütemezett időablak fix áramkorláttal (Prioritás BE)

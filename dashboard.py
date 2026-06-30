@@ -148,7 +148,7 @@ LOGIN_HTML = """<!DOCTYPE html>
             e.preventDefault();
             const password = document.getElementById('password').value;
             const errBox = document.getElementById('error-msg');
-            
+
             fetch('/api/login', {
                 method: 'POST',
                 headers: {
@@ -3050,6 +3050,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 # --- HTTP KEZELŐ OSZTÁLY ---
 
 class ControllerHTTPHandler(BaseHTTPRequestHandler):
+
     def log_message(self, format, *args):
         pass
 
@@ -3161,6 +3162,7 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "error", "message": f"Hiba: {e}"}).encode('utf-8'))
+            return
                 
         elif self.path == '/api/unlock':
             with state_lock:
@@ -3223,9 +3225,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     if "schedule_solar_auto" in config_data:
                         shared_state["schedule_solar_auto"] = bool(config_data["schedule_solar_auto"])
                     if "auto_enabled" in config_data:
-                        shared_state["auto_enabled"] = bool(config_data["auto_enabled"])
+                        new_auto = bool(config_data["auto_enabled"])
+                        if new_auto and not shared_state.get("auto_enabled", False):
+                            shared_state["force_submode"] = "schedule"
+                        shared_state["auto_enabled"] = new_auto
                     if "schedule_enabled" in config_data:
-                        shared_state["schedule_enabled"] = bool(config_data["schedule_enabled"])
+                        new_sched = bool(config_data["schedule_enabled"])
+                        if new_sched and not shared_state.get("schedule_enabled", False):
+                            shared_state["force_submode"] = "schedule"
+                        shared_state["schedule_enabled"] = new_sched
                     
                     # Alkalmazási és újraindítási flagek
                     if config_data.get("apply_with_stop"):
@@ -3254,6 +3262,8 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 if new_mode in ("monitoring", "auto", "schedule", "force"):
                     with state_lock:
                         shared_state["control_mode"] = new_mode
+                        if new_mode != "force":
+                            shared_state["force_submode"] = "schedule"
                         # Ha kézzel módosítjuk az üzemmódot, töröljük a hibajelzést és a cooldown-t
                         shared_state["error_message"] = ""
                         shared_state["cooldown_until"] = 0.0
@@ -3284,6 +3294,10 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                         shared_state["cooldown_until"] = 0.0
                         if new_submode == "manual_start":
                             shared_state["manual_start_requested"] = True
+                        elif new_submode == "manual_stop":
+                            # A felhasználó logikája alapján: a Kézi leállítás kikapcsolja az automatikus módokat
+                            shared_state["auto_enabled"] = False
+                            shared_state["schedule_enabled"] = False
                     
                     save_config_file()
                     log_message(f"Kényszerített al-üzemmód váltás: {new_submode.upper()}")
