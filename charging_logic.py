@@ -182,6 +182,8 @@ async def run_inverter_polling():
 
     while True:
         if shared_state["simulation"]:
+            with state_lock:
+                shared_state["task_pong"]["inverter"] = time.time()
             await asyncio.sleep(10)
             continue
 
@@ -206,6 +208,8 @@ async def run_inverter_polling():
                 shared_state["inverter_connected"] = False
             log_message(f"Deye Logger lekérdezési hiba ({INVERTER_IP}): {e}. Újrapróbálkozás 10 másodperc múlva...")
 
+        with state_lock:
+            shared_state["task_pong"]["inverter"] = time.time()
         await asyncio.sleep(10)
 
 
@@ -238,6 +242,8 @@ async def run_ble_client():
                 ble_command_queue.task_done()
             except asyncio.QueueEmpty:
                 pass
+            with state_lock:
+                shared_state["task_pong"]["ble"] = time.time()
         return
 
     while True:
@@ -387,6 +393,9 @@ async def run_ble_client():
                         ble_command_queue.task_done()
                     except asyncio.QueueEmpty:
                         await asyncio.sleep(1)
+                    
+                    with state_lock:
+                        shared_state["task_pong"]["ble"] = time.time()
             except Exception as e:
                 raise e
             finally:
@@ -406,6 +415,8 @@ async def run_ble_client():
             # Hiba/szakadás esetén azonnal ürítjük a parancssort
             clear_ble_command_queue()
 
+            with state_lock:
+                shared_state["task_pong"]["ble"] = time.time()
             await asyncio.sleep(5)
 # Aszinkron Inverter adatlekérdező task
 # Globális telemetria időpont és BLE biztonsági wrapperek
@@ -503,6 +514,8 @@ async def run_charge_controller():
             return 0
 
     while True:
+        with state_lock:
+            shared_state["task_pong"]["controller"] = time.time()
         await asyncio.sleep(5)  # 5 másodpercenként értékeljük ki a helyzetet
 
         current_time = time.time()
@@ -1455,14 +1468,6 @@ def ble_notification_received(sender, data_bytes):
     if len(data_bytes) < 4:
         return
 
-    # Csatlakozó kihúzás észlelése
-    if b"Pull Plug" in data_bytes:
-        with state_lock:
-            shared_state["pull_plug"] = True
-            shared_state["charging_active"] = False
-            shared_state["currents"] = [0.0, 0.0, 0.0]
-        log_message("FIGYELEM: A csatlakozó kábel kihúzásra került a töltőből!")
-        return
 
     ble_rx_buffer.extend(data_bytes)
 

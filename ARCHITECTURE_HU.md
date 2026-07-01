@@ -130,3 +130,8 @@ A töltő reléinek és vezérlőjének védelme érdekében a gyors állapotvá
 
 ### 4.5 Továbbfejlesztett Ház Túlterhelés Védelem
 A ház túlterhelés védelmi logikája a teljes terhelést a `(UPS Terhelés + Töltő Terhelés)` képlettel számolja ki. Ha ez az összeg meghaladja a beállított `house_power_limit_w` konfigurációt, a töltő azonnal leáll. Ez a biztonsági vészleállítás szintén megkerüli a Cooldown és Lockdown késleltetéseket, hogy megelőzze a kismegszakító leoldását.
+
+### 4.6 Központi Ping-Pong Watchdog (Supervisor)
+A `main.py`-ban található egy dedikált végtelen ciklus, amely 5 másodpercenként felügyeli a három fő aszinkron feladat (Inverter, BLE, Töltésvezérlő) egészségét. A Watchdog kétféle hibát detektál:
+1. **Crash védelem:** Ha a feladat `task.done()` állapota True, ellenőrzi, hogy dobott-e kivételt (`task.result()`). Ha a szál egy hiba miatt leállt, a Watchdog elkapja a kivételt és újra létrehozza a feladatot.
+2. **Freeze (Befagyás) védelem:** Minden háttérszál a természetes futási ciklusának végén egy "PONG" időbélyeget frissít a `shared_state["task_pong"]` szótárban. Ha a Watchdog azt észleli, hogy egy szál több mint 30 másodperce nem küldött PONG jelet (pl. egy blokkoló hálózati művelet miatt), akkor a beragadt feladatot `task.cancel()` hívással megszakítja, és a következő ciklusban tisztán újraindítja. Ez az architektúra biztosítja a robusztus működést anélkül, hogy mesterséges pingeket kényszerítene a szálakba.

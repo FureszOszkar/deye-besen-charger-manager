@@ -2,7 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
-<img width="1892" height="881" alt="kép" src="https://github.com/user-attachments/assets/c8b426bb-626f-414b-9658-bd568a5e5447" />
 
 ---
 
@@ -83,6 +82,9 @@ Ezzel a móddal felülbírálhatsz minden automatizációt, és manuálisan adha
 - **Anti-Flapping Cooldown (Várakozási idő):** Megakadályozza a gyors Start/Stop ciklusokat egy 20 másodperces várakozási idő kikényszerítésével 2 egymást követő állapotváltozás után.
 - **Biztonsági Zárolás (Lockdown):** Teljesen zárolja a rendszert, ha 40 másodpercen belül 5 állapotváltozás történik, vagy ha 10 egymást követő automatikus parancs fut le emberi beavatkozás nélkül. A műszerfalról (dashboard) manuális feloldást (Unlock) igényel.
 - **Teljes Ház Terhelésvédelem:** A túlterhelés védelem a `(UPS Terhelés + Töltő Terhelés)` összegét értékeli ki a főmegszakítók védelme érdekében. A túlterhelésből fakadó leállítások és a manuális Hard STOP parancsok mindig megkerülik a cooldown/lockdown korlátozásokat.
+- **Központi Ping-Pong Watchdog (Supervisor):** Egy dedikált felügyelő mechanizmus védi a szoftvert a leállásoktól. Kétféle hálózati/szoftveres anomáliát képes automatikusan kezelni:
+    - *Összeomlás (Crash) védelem:* Ha bármelyik háttérszál váratlan kivétellel (pl. eldobott hálózati kapcsolat) leállna, a Watchdog a főprogram összeomlása nélkül elkapja a hibát, és azonnal újraindítja az adott szálat.
+    - *Befagyás (Freeze) védelem:* A szálak működésük során ciklikusan életjelet (PONG) hagynak a memóriában. Ha a Watchdog 30 másodpercig nem észlel életjelet egy száltól (pl. végtelen TCP várakozás miatt befagyott), erőszakosan leállítja, majd tiszta lappal újraindítja.
 
 ---
 

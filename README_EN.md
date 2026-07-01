@@ -205,3 +205,6 @@ If you encounter any logical bugs, unexpected behavior, or malfunctions during u
 - **Anti-Flapping Cooldown:** Prevents rapid start/stop cycling by enforcing a 20-second cooldown window after 2 consecutive state changes.
 - **Safety Lockdown:** Completely locks the system if 5 state transitions occur within 40 seconds, or if 10 consecutive automated commands run without user input. Requires manual unlock from the dashboard.
 - **Total House Load Protection:** Overload safety evaluates (UPS Load + Charger Load) to protect the main breakers. Overload and manual Hard STOP commands always bypass the cooldown/lockdown constraints.
+- **Central Ping-Pong Watchdog (Supervisor):** A dedicated supervisor mechanism protects the software from fatal halts. It handles two types of software/network anomalies automatically:
+    - *Crash Protection:* If any background thread terminates unexpectedly with an exception (e.g., dropped network socket), the Watchdog catches the error without crashing the main program and immediately restarts the thread.
+    - *Freeze Protection:* Background threads cyclically leave a "PONG" timestamp in the shared memory during their operation. If the Watchdog detects no PONG signal from a thread for 30 seconds (e.g., stuck in an infinite TCP wait), it forcefully terminates the stuck thread and restarts it cleanly.
