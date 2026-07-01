@@ -1832,6 +1832,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        function formatPower(val, isGrid, isBattery) {
+            let unitMain = " kW";
+            let unitSub = " W";
+            
+            let mainStr = (val / 1000).toFixed(3) + unitMain;
+            let subStr = "(" + val + unitSub + ")";
+            
+            return { main: mainStr, sub: subStr };
+        }
+
         function updateSliderBackground(slider) {
             const min = parseFloat(slider.min) || 0;
             const max = parseFloat(slider.max) || 100;
@@ -1844,25 +1854,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         function togglePersistCheckbox() {
             const cb = document.getElementById('auto_persist_mode_on_restart');
             cb.checked = !cb.checked;
-        }
-
-        function formatPower(val, isGrid, isBattery) {
-            const absVal = Math.abs(val);
-            let unitMain = " kW";
-            let unitSub = " W";
-            
-            let mainStr = "";
-            let subStr = "";
-            
-            if (absVal >= 1000) {
-                mainStr = (absVal / 1000).toFixed(3) + unitMain;
-                subStr = "(" + absVal + unitSub + ")";
-            } else {
-                mainStr = absVal + unitSub;
-                subStr = "(" + (absVal / 1000).toFixed(3) + unitMain + ")";
-            }
-            
-            return { main: mainStr, sub: subStr };
         }
 
         function renderSchedule(scheduleList) {
@@ -2287,11 +2278,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const gridVal = document.getElementById('grid-power-main');
                 gridVal.innerText = gridFmt.main;
                 document.getElementById('grid-power-sub').innerText = gridFmt.sub;
-                if (data.grid_power < 0) {
-                    gridVal.className = "metric-value surplus-val";
-                } else {
-                    gridVal.className = "metric-value consumption-val";
-                }
+                gridVal.className = "metric-value";
 
                 // PV Power
                 const pvFmt = formatPower(data.pv_power, false, false);
@@ -2313,11 +2300,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const batVal = document.getElementById('battery-power-main');
                 batVal.innerText = batFmt.main;
                 document.getElementById('battery-power-sub').innerText = batFmt.sub;
-                if (data.battery_power >= 0) {
-                    batVal.className = "metric-value surplus-val";
-                } else {
-                    batVal.className = "metric-value consumption-val";
-                }
+                batVal.className = "metric-value";
 
                 // Battery SoC
                 document.getElementById('battery-soc').innerHTML = data.battery_soc + '<span class="metric-unit">%</span>';
