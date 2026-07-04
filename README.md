@@ -2,7 +2,8 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
-<img width="1880" height="896" alt="kép" src="https://github.com/user-attachments/assets/d8cf30f8-070f-4929-a6eb-8c12895364c0" />
+<img width="1884" height="900" alt="kép" src="https://github.com/user-attachments/assets/0de44493-eaba-473e-892b-60f5f91c2ef7" />
+
 
 ---
 
