@@ -1,16 +1,67 @@
 import json
 import secrets
+import os
+import base64
+import hashlib
+import hmac as hmac_module
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 from config import (
     shared_state, state_lock, log_message,
     HTTP_PORT, DEFAULT_CONFIG, save_config_file,
-    WEB_AUTH_ENABLED, WEB_PASSWORD
+    WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
 )
 
 # --- WEBES HITELESÍTÉS ---
-active_sessions = set()
+active_sessions = {}  # {token: session_key_bytes}
+
+# --- PSK TITKOSÍTÁSI MODUL ---
+def derive_session_key(password, client_nonce, iterations):
+    """PBKDF2-SHA256 kulcsszármaztatás: jelszóból + nonce-ból AES-256 kulcsot gyárt."""
+    return hashlib.pbkdf2_hmac(
+        'sha256', password.encode('utf-8'),
+        client_nonce.encode('utf-8'),
+        iterations=iterations, dklen=32
+    )
+
+def verify_auth_proof(session_key, received_proof_b64):
+    """HMAC-SHA256 hitelesítési bizonyíték ellenőrzése."""
+    expected = hmac_module.new(session_key, b"AUTH_PROOF", hashlib.sha256).digest()
+    received = base64.b64decode(received_proof_b64)
+    return hmac_module.compare_digest(expected, received)
+
+def encrypt_response(session_key, data):
+    """AES-256-CBC titkosítás HMAC-SHA256 hitelesítéssel a szerver válaszához (CryptoJS kompatibilis)."""
+    iv = os.urandom(16)
+    cipher = AES.new(session_key, AES.MODE_CBC, iv)
+    plaintext = json.dumps(data).encode('utf-8')
+    ciphertext = cipher.encrypt(pad(plaintext, AES.block_size))
+    # Encrypt-then-MAC: HMAC(IV + Ciphertext)
+    mac = hmac_module.new(session_key, iv + ciphertext, hashlib.sha256).digest()
+    return {
+        "iv": base64.b64encode(iv).decode('ascii'),
+        "data": base64.b64encode(ciphertext).decode('ascii'),
+        "mac": base64.b64encode(mac).decode('ascii'),
+        "enc": True
+    }
+
+def decrypt_request(session_key, encrypted_data):
+    """AES-256-CBC visszafejtés HMAC-SHA256 ellenőrzéssel a kliens kéréseihez."""
+    iv = base64.b64decode(encrypted_data["iv"])
+    ciphertext = base64.b64decode(encrypted_data["data"])
+    received_mac = base64.b64decode(encrypted_data["mac"])
+    
+    # Verify MAC first
+    expected_mac = hmac_module.new(session_key, iv + ciphertext, hashlib.sha256).digest()
+    if not hmac_module.compare_digest(expected_mac, received_mac):
+        raise ValueError("MAC ellenőrzés sikertelen (Adat módosult vagy hibás kulcs)!")
+        
+    cipher = AES.new(session_key, AES.MODE_CBC, iv)
+    plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+    return json.loads(plaintext.decode('utf-8'))
 
 # --- HTML SABLONOK ---
 
@@ -143,34 +194,74 @@ LOGIN_HTML = """<!DOCTYPE html>
             <button type="submit" class="btn-login">Belépés</button>
         </form>
     </div>
+    <script src="/crypto-js.min.js"></script>
     <script>
+        const PBKDF2_ITERATIONS = {{PBKDF2_ITERATIONS}};
+
         document.getElementById('login-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const password = document.getElementById('password').value;
             const errBox = document.getElementById('error-msg');
+            const btn = document.querySelector('.btn-login');
+            btn.disabled = true;
+            btn.innerText = 'Titkosítás...';
 
-            fetch('/api/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ password: password })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.location.reload();
-                } else {
+            // Mivel a CryptoJS PBKDF2 szinkron és tovább tart, setTimeout-tal aszinkronná tesszük a UI frissítése miatt
+            setTimeout(async function() {
+                try {
+                    // 1. Véletlenszerű nonce generálása (CryptoJS random)
+                    const clientNonceWordArray = CryptoJS.lib.WordArray.random(16);
+                    const clientNonce = CryptoJS.enc.Hex.stringify(clientNonceWordArray);
+
+                    // 2. Kulcsszármaztatás (PBKDF2 - szoftveres)
+                    const salt = CryptoJS.enc.Utf8.parse(clientNonce);
+                    const key = CryptoJS.PBKDF2(password, salt, {
+                        keySize: 256 / 32, // 256 bit = 8 words
+                        iterations: PBKDF2_ITERATIONS,
+                        hasher: CryptoJS.algo.SHA256
+                    });
+                    const sessionKeyStr = CryptoJS.enc.Hex.stringify(key);
+
+                    // 3. Hitelesítési bizonyíték (HMAC)
+                    const authProof = CryptoJS.HmacSHA256("AUTH_PROOF", key);
+                    const authProofB64 = CryptoJS.enc.Base64.stringify(authProof);
+
+                    // 4. Kulcs mentése a sessionStorage-ba (a dashboard-nak)
+                    sessionStorage.setItem('_psk_key_hex', sessionKeyStr);
+                    sessionStorage.setItem('_psk_nonce', clientNonce);
+
+                    // 5. Küldés: jelszó SOSEM utazik a hálózaton!
+                    const res = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ clientNonce: clientNonce, authProof: authProofB64 })
+                    });
+                    const data = await res.json();
+
+                    if (data.status === 'success') {
+                        window.location.reload();
+                    } else {
+                        sessionStorage.removeItem('_psk_key_hex');
+                        sessionStorage.removeItem('_psk_nonce');
+                        errBox.style.display = 'block';
+                        errBox.innerText = data.message || 'Helytelen jelszó!';
+                        document.getElementById('password').value = '';
+                        btn.disabled = false;
+                        btn.innerText = 'Belépés';
+                    }
+                } catch (err) {
+                    console.error(err);
+                    sessionStorage.removeItem('_psk_key_hex');
+                    sessionStorage.removeItem('_psk_nonce');
                     errBox.style.display = 'block';
-                    document.getElementById('password').value = '';
+                    errBox.innerText = 'Hiba a titkosítási folyamatban!';
+                    btn.disabled = false;
+                    btn.innerText = 'Belépés';
                 }
-            })
-            .catch(err => {
-                errBox.style.display = 'block';
-                errBox.innerText = 'Hiba a szerverrel való kapcsolatban!';
-            });
+            }, 50); // Kis késleltetés, hogy a UI frissüljön
         });
     </script>
+
 </body>
 </html>"""
 
@@ -1812,7 +1903,110 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         Deye & BESEN Helyi Töltésoptimalizáló Vezérlő &copy; 2026
     </footer>
 
+    <script src="/crypto-js.min.js"></script>
     <script>
+        // === PSK TITKOSÍTÁSI MODUL (Kliens oldal, CryptoJS alapú AES-CBC + HMAC) ===
+        let _sessionKeyHex = null;
+
+        // SessionKey betöltése a sessionStorage-ból (a login oldal mentette oda)
+        (function initPSK() {
+            const storedKey = sessionStorage.getItem('_psk_key_hex');
+            if (storedKey) {
+                _sessionKeyHex = storedKey;
+            }
+        })();
+
+        function _pskEncrypt(sessionKeyHex, plaintext) {
+            const iv = CryptoJS.lib.WordArray.random(16);
+            const key = CryptoJS.enc.Hex.parse(sessionKeyHex);
+            const encrypted = CryptoJS.AES.encrypt(plaintext, key, {
+                iv: iv,
+                mode: CryptoJS.mode.CBC,
+                padding: CryptoJS.pad.Pkcs7
+            });
+            const ciphertext = encrypted.ciphertext;
+            const macData = iv.clone().concat(ciphertext);
+            const mac = CryptoJS.HmacSHA256(macData, key);
+            
+            return JSON.stringify({
+                iv: CryptoJS.enc.Base64.stringify(iv),
+                data: CryptoJS.enc.Base64.stringify(ciphertext),
+                mac: CryptoJS.enc.Base64.stringify(mac),
+                enc: true
+            });
+        }
+
+        function _pskDecrypt(sessionKeyHex, ivB64, dataB64, macB64) {
+            const iv = CryptoJS.enc.Base64.parse(ivB64);
+            const ciphertext = CryptoJS.enc.Base64.parse(dataB64);
+            const receivedMac = CryptoJS.enc.Base64.parse(macB64);
+            const key = CryptoJS.enc.Hex.parse(sessionKeyHex);
+            
+            // HMAC ellenőrzése
+            const macData = iv.clone().concat(ciphertext);
+            const expectedMac = CryptoJS.HmacSHA256(macData, key);
+            if (expectedMac.toString() !== receivedMac.toString()) {
+                throw new Error("MAC ellenőrzés sikertelen!");
+            }
+            
+            const cipherParams = CryptoJS.lib.CipherParams.create({ ciphertext: ciphertext });
+            const decrypted = CryptoJS.AES.decrypt(cipherParams, key, {
+                iv: iv,
+                mode: CryptoJS.mode.CBC,
+                padding: CryptoJS.pad.Pkcs7
+            });
+            return JSON.parse(decrypted.toString(CryptoJS.enc.Utf8));
+        }
+
+        // Globális fetch() felülírása: átlátszó titkosítás/visszafejtés
+        const _originalFetch = window.fetch;
+        window.fetch = async function(url, options = {}) {
+            // Login és statikus fájlok: nem titkosítjuk
+            if (url === '/api/login' || url === '/background.png' || url === '/crypto-js.min.js') {
+                return _originalFetch(url, options);
+            }
+
+            // Kimenő body titkosítása (POST kérések)
+            if (options.body && _sessionKeyHex) {
+                const encryptedBody = _pskEncrypt(_sessionKeyHex, options.body);
+                options.body = encryptedBody;
+                if (!options.headers) options.headers = {};
+                options.headers['Content-Type'] = 'application/json';
+            }
+
+            // Eredeti fetch hívás
+            const response = await _originalFetch(url, options);
+
+            // 401 kezelés: kijelentkeztetés
+            if (response.status === 401) {
+                sessionStorage.removeItem('_psk_key_hex');
+                sessionStorage.removeItem('_psk_nonce');
+                window.location.reload();
+                return response;
+            }
+
+            // Válasz visszafejtése, ha titkosított
+            if (_sessionKeyHex && response.ok) {
+                try {
+                    const cloned = response.clone();
+                    const json = await cloned.json();
+                    if (json && json.enc && json.iv && json.data && json.mac) {
+                        const decrypted = _pskDecrypt(_sessionKeyHex, json.iv, json.data, json.mac);
+                        return new Response(JSON.stringify(decrypted), {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: response.headers
+                        });
+                    }
+                } catch (e) {
+                    // Nem JSON vagy nem titkosított válasz: eredeti response visszaadása
+                }
+            }
+
+            return response;
+        };
+        // === PSK MODUL VÉGE ===
+
         let configLoaded = false;
         let currentConfig = {};
         let originalAutoAmps = 16;
@@ -3058,6 +3252,40 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             return True
         return False
 
+    def get_session_key(self):
+        """Visszaadja az aktuális session titkosítási kulcsát."""
+        session_token = self.get_cookie('session')
+        if session_token:
+            return active_sessions.get(session_token)
+        return None
+
+    def _read_encrypted_body(self):
+        """POST body olvasása és visszafejtése, ha titkosított."""
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        data = json.loads(post_data.decode('utf-8'))
+        if data.get("enc"):
+            session_key = self.get_session_key()
+            if session_key:
+                return decrypt_request(session_key, data)
+            raise ValueError("Titkosított kérés érvényes session kulcs nélkül")
+        return data
+
+    def _send_encrypted_json(self, data, status=200, extra_headers=None):
+        """JSON válasz küldése, titkosítva ha van session kulcs."""
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
+        self.end_headers()
+        session_key = self.get_session_key()
+        if session_key and WEB_AUTH_ENABLED:
+            response_data = encrypt_response(session_key, data)
+        else:
+            response_data = data
+        self.wfile.write(json.dumps(response_data).encode('utf-8'))
+
     def do_GET(self):
         global shared_state
         if self.path == '/background.png':
@@ -3077,6 +3305,24 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             else:
                 self.send_error(404, "Fájl nem található")
             return
+            
+        if self.path == '/crypto-js.min.js':
+            import os
+            import sys
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            crypto_path = os.path.join(base_dir, 'crypto-js.min.js')
+            if os.path.exists(crypto_path):
+                self.send_response(200)
+                self.send_header('Content-type', 'application/javascript; charset=utf-8')
+                self.end_headers()
+                with open(crypto_path, 'rb') as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_error(404, "Fájl nem található")
+            return
 
         # Ellenőrizzük az autentikációt minden más GET végpontnál
         if not self.is_authenticated():
@@ -3087,7 +3333,7 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 self.send_header('Pragma', 'no-cache')
                 self.send_header('Expires', '0')
                 self.end_headers()
-                self.wfile.write(LOGIN_HTML.encode('utf-8'))
+                self.wfile.write(LOGIN_HTML.replace('{{PBKDF2_ITERATIONS}}', str(PBKDF2_ITERATIONS)).encode('utf-8'))
             else:
                 self.send_response(401)
                 self.send_header('Content-type', 'application/json')
@@ -3104,42 +3350,51 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(DASHBOARD_HTML.encode('utf-8'))
         elif self.path == '/api/status':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
             with state_lock:
-                status_json = json.dumps(shared_state)
-            self.wfile.write(status_json.encode('utf-8'))
+                status_data = json.loads(json.dumps(shared_state))
+            self._send_encrypted_json(status_data)
         else:
             self.send_error(404, "Fájl nem található")
 
     def do_POST(self):
         global shared_state
         
-        # Bejelentkezés kezelése (mindig engedélyezett hitelesítés nélkül is)
+        # Bejelentkezés kezelése - PSK Challenge-Response (jelszó SOSEM utazik a hálózaton)
         if self.path == '/api/login':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             try:
                 login_data = json.loads(post_data.decode('utf-8'))
-                submitted_pwd = login_data.get("password")
-                if submitted_pwd == WEB_PASSWORD:
-                    # Biztonságos token generálása
-                    token = secrets.token_hex(16)
-                    active_sessions.add(token)
+                client_nonce = login_data.get("clientNonce")
+                auth_proof = login_data.get("authProof")
+                
+                if client_nonce and auth_proof:
+                    # Kulcsszármaztatás a szerveren tárolt jelszóból + kliens nonce-ból
+                    session_key = derive_session_key(WEB_PASSWORD, client_nonce, PBKDF2_ITERATIONS)
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Set-Cookie', f'session={token}; HttpOnly; Path=/; SameSite=Lax')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-                    log_message("Sikeres webes bejelentkezés.")
+                    if verify_auth_proof(session_key, auth_proof):
+                        # Sikeres hitelesítés: session kulcs eltárolása
+                        token = secrets.token_hex(16)
+                        active_sessions[token] = session_key
+                        
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Set-Cookie', f'session={token}; HttpOnly; Path=/; SameSite=Lax')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                        log_message("Sikeres webes bejelentkezés (PSK titkosított csatorna).")
+                    else:
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"status": "error", "message": "Helytelen jelszó!"}).encode('utf-8'))
+                        log_message("Sikertelen webes bejelentkezési kísérlet (PSK).")
                 else:
                     self.send_response(200)
                     self.send_header('Content-type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Helytelen jelszó!"}).encode('utf-8'))
-                    log_message("Sikertelen webes bejelentkezési kísérlet.")
+                    self.wfile.write(json.dumps({"status": "error", "message": "Hiányzó titkosítási adatok!"}).encode('utf-8'))
+                    log_message("Bejelentkezési kísérlet hiányzó PSK adatokkal.")
             except Exception as e:
                 self.send_response(400)
                 self.send_header('Content-type', 'application/json')
@@ -3171,7 +3426,7 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
         if self.path == '/api/logout':
             session_token = self.get_cookie('session')
             if session_token in active_sessions:
-                active_sessions.remove(session_token)
+                active_sessions.pop(session_token, None)
             
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -3182,10 +3437,8 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             return
 
         elif self.path == '/api/config':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                config_data = json.loads(post_data.decode('utf-8'))
+                config_data = self._read_encrypted_body()
                 with state_lock:
                     if "start_soc" in config_data:
                         shared_state["start_soc"] = int(config_data["start_soc"])
@@ -3229,18 +3482,13 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 save_config_file()
                 log_message("Új konfigurációs paraméterek elmentve.")
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "success", "message": "Beállítások sikeresen mentve!"}).encode('utf-8'))
+                self._send_encrypted_json({"status": "success", "message": "Beállítások sikeresen mentve!"})
             except Exception as e:
                 self.send_error(400, f"Hibás adatformátum: {e}")
                 
         elif self.path == '/api/mode':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                mode_data = json.loads(post_data.decode('utf-8'))
+                mode_data = self._read_encrypted_body()
                 new_mode = mode_data.get("control_mode")
                 if new_mode in ("monitoring", "auto", "schedule", "force"):
                     with state_lock:
@@ -3254,20 +3502,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     save_config_file()
                     log_message(f"Üzemmód váltás: {new_mode.upper()}")
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                    self._send_encrypted_json({"status": "success"})
                 else:
                     self.send_error(400, "Érvénytelen üzemmód")
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
 
         elif self.path == '/api/force_submode':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                mode_data = json.loads(post_data.decode('utf-8'))
+                mode_data = self._read_encrypted_body()
                 new_submode = mode_data.get("force_submode")
                 if new_submode in ("manual_start", "manual_stop", "schedule"):
                     with state_lock:
@@ -3285,20 +3528,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     save_config_file()
                     log_message(f"Kényszerített al-üzemmód váltás: {new_submode.upper()}")
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                    self._send_encrypted_json({"status": "success"})
                 else:
                     self.send_error(400, "Érvénytelen al-üzemmód")
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
 
         elif self.path == '/api/set_current':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                current_data = json.loads(post_data.decode('utf-8'))
+                current_data = self._read_encrypted_body()
                 amps = int(current_data.get("charger_max_amps", 16))
                 if 6 <= amps <= 16:
                     with state_lock:
@@ -3306,20 +3544,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     save_config_file()
                     log_message(f"Töltési áramerősség korlát beállítva: {amps} A")
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "success", "message": "Áramerősség sikeresen frissítve!"}).encode('utf-8'))
+                    self._send_encrypted_json({"status": "success", "message": "Áramerősség sikeresen frissítve!"})
                 else:
                     self.send_error(400, "Érvénytelen áramerősség (6-16A)")
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
 
         elif self.path == '/api/sim_toggle':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                data = json.loads(post_data.decode('utf-8'))
+                data = self._read_encrypted_body()
                 sim_val = bool(data.get("simulation", False))
                 with state_lock:
                     shared_state["simulation"] = sim_val
@@ -3341,18 +3574,13 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                         shared_state["last_assertion_error"] = ""
                 
                 log_message(f"Szimulációs mód {'BEKAPCSOLVA' if sim_val else 'KIKAPCSOLVA'}")
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "success", "simulation": sim_val}).encode('utf-8'))
+                self._send_encrypted_json({"status": "success", "simulation": sim_val})
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
 
         elif self.path == '/api/sim_data':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             try:
-                data = json.loads(post_data.decode('utf-8'))
+                data = self._read_encrypted_body()
                 with state_lock:
                     if "grid_power" in data:
                         shared_state["grid_power"] = int(data["grid_power"])
@@ -3375,10 +3603,7 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     if "sim_custom_day" in data:
                         shared_state["sim_custom_day"] = str(data["sim_custom_day"]).strip()
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                self._send_encrypted_json({"status": "success"})
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
 

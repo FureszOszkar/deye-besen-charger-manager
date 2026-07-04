@@ -171,13 +171,162 @@ The exact binary layout of the payload (`payload = packet[21:]`) is as follows:
 
 **Selective Logging and Background Clearance**:
 The charger broadcasts all uncleared history records sequentially upon reconnection (including external mobile app sessions), prompting the controller to implement an intelligent selective logging and background clearance mechanism. When starting a charge (Manual, Scheduled, or Solar Auto), the generated `charge_id` is stored in the global `_last_initiated_session_id` and saved to `config.json`. Upon receiving a `0x000A` packet, the controller compares its `session_id` with `_last_initiated_session_id`. If they match, the session data is stored in `shared_state["last_charge"]` and persisted to `config.json`, where it is displayed on the dashboard when charging is inactive. If they do not match (external or old backlog session), the controller silently acknowledges and clears the record by sending `0x800A` back to the charger, ensuring it does not get stuck, without overwriting its own session history on the dashboard. The `payload[95:97]` contains the number of power log entries as a 2-byte Big-Endian uint16, and `payload[97:]` consists of a time-series power log array where each entry is a 2-byte Big-Endian integer in Watts (e.g., `0x0FC8` = 4040 W).
+# Deye & BESEN Controller – Architecture and Code Structure Documentation
 
-Additionally, the software has undergone several recent changes:
-1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently.
-2. Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, provided the grid power threshold is greater than 0.
-3. HTML input step values for Watt parameters have been updated to `step=1`, enabling single Watt resolution settings (e.g., 80 W).
+This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `main.py (along with its modules)` software for developers.
 
-Safely processing this packet prevents false shutdowns. Previously, the first bytes of the unhandled packet were misread as a charging status change (since the RFID string characters did not match the expected status value), causing unexpected stops.
+---
+
+## 1. System Architecture and Threading Model
+
+The application is fully self-contained in a multi-module Python structure, managing concurrent hardware polling, background safety logic, and the HTTP dashboard server.
+
+The core loops run inside an **asynchronous event loop (Python `asyncio`)**, while the Web Dashboard and API are served from a separate background thread to guarantee non-blocking processing.
+
+```
++------------------------------------------------------------+
+|                  Background HTTP Thread                    |
+|                                                            |
+|  [ThreadingHTTPServer] --> Serves ------> [Web Dashboard]  |
+|           |                                                |
+|           +----------> Updates ---------> [config.json]    |
++------------------------------------------------------------+
+                               |
+                       Reads / Updates
+                               |
+                        [ shared_state ]
+                    (Lock: state_lock mutex)
+                               |
+                       Reads / Updates
+                               v
++------------------------------------------------------------+
+|               Asynchronous asyncio Main Loop               |
+|                                                            |
+|  [run_inverter_polling]   --> Modbus/TCP --> [Deye]        |
+|  [run_charge_controller]  --> Decision   --> [Evaluation]  |
+|                                                    |       |
+|                                         Pushes     |       |
+|                                                    v       |
+|  [run_ble_client]  <-- [ble_command_queue] <-------+       |
+|         |                                                  |
+|         +------------------> BLE Command --> [BESEN EVSE]  |
++------------------------------------------------------------+
+```
+
+### A) Thread-Safe State Management (`shared_state`)
+Since the Web Server (HTTP thread) and the `asyncio` loop (main thread) run concurrently, data is shared via a single global Python dictionary called `shared_state`. To prevent race conditions, all read/write accesses to this dictionary are synchronized using a mutex (`state_lock = threading.Lock()`).
+
+---
+
+## 2. Asynchronous Background Tasks (asyncio Tasks)
+
+Upon startup, the `main()` function launches several async tasks in parallel:
+
+### 1. `run_inverter_polling()`
+* **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds. The connection is now persistent (using a global _persistent_inverter), and it disconnects and resets only if a socket/Modbus error occurs, thus avoiding socket memory leaks.
+* **Library:** `pysolarmanv5` (connecting on TCP port `8899`).
+* **Threading Safety (Asynchronization):** Since `pysolarmanv5` Modbus polling contains synchronous blocking network calls, these operations are isolated inside a blocking helper `fetch_inverter_data_blocking()` and run in a separate background worker thread using `asyncio.to_thread()`. This prevents network glitches on the Deye logger stick from blocking the main event loop and causing Bluetooth timeout disconnects.
+* **Queried Registers:**
+  * **Register 607 (Signed 16-bit):** Inverter grid-port power (internal grid meter).
+  * **Register 619 (Signed 16-bit):** Utility grid power (measured by external CT clamps at the meter).
+  * **Register 643 (Unsigned 16-bit):** Inverter UPS (Backup) output load. This represents the total consumption of the household.
+  * **Registers 672-673 (Unsigned 16-bit, summed):** Solar photovoltaic generation (PV) power (PV1 & PV2 Power in Watts).
+  * **Register 590 (Signed 16-bit):** Storage battery power (+ = charging, - = discharging).
+  * **Register 588 (Unsigned 16-bit):** Storage battery State of Charge (SoC %).
+* **Calculated Non-UPS load:** `charger_power = max(0, grid_power_external - grid_power_internal)`. This calculates the total load of all consumers on the grid side (before the inverter), which includes the EV charger and other non-UPS loads.
+
+### 2. `run_ble_client()`
+* **Task:** Manages the BLE connection to the BESEN BS20 car charger, processes the `ble_command_queue`, and receives notifications.
+* **Library:** `bleak`.
+* **Timeouts and Safe Wrappers:** Bluetooth write and notify registrations lack built-in timeout handling in Bleak. To prevent freezes, all interactions are performed via custom wrappers `safe_ble_write()` and `safe_ble_start_notify()`, which enforce a 5.0 second timeout limit using `asyncio.wait_for()`. Any error or timeout triggers a clean client disconnection to start the reconnection loop.
+* **Bluetooth Connection Timeout:** Establishing a connection with `BleakClient` under Windows is prone to hanging indefinitely. To prevent this, the connection process is wrapped in an explicit `asyncio.wait_for(client.connect(), timeout=20.0)` call, which terminates the blocked attempt after 20 seconds and restarts the connection cycle.
+* **Telemetry Watchdog:** The client tracks telemetry activity via a global `last_rx_time` timestamp. If the connection state is `LOGGED_IN` but no telemetry packets are received from the charger for 15 seconds, the watchdog triggers a connection reset and cleanly restarts the BLE discovery and reconnection process.
+* **Thread-Safe Callback Processing (main_loop):** Since Bleak invokes the telemetry callback (`ble_notification_received()`) on its own background thread (WinRT event thread), directly scheduling async tasks (`asyncio.create_task()`) would fail due to the absence of a running event loop in that thread. To resolve this, we store the main event loop reference in the global `main_loop` variable at startup and use `asyncio.run_coroutine_threadsafe(..., main_loop)` to safely dispatch packet processing back to the main thread's event loop.
+* **Thread-Safe BLE Queue Clearing (`clear_ble_command_queue`):** To prevent command accumulation during offline periods and avoid sudden bursts of commands upon reconnection, the system implements a thread-safe `clear_ble_command_queue()` function that clears any leftover items in the `ble_command_queue` whenever a disconnection or reconnection occurs.
+* **Important GATT UUIDs:**
+  * `FFE4` (Notify): Where the charger streams its telemetry (voltage, current feedback, temperature, status).
+  * `FFF3` (Write): Used to write commands (Start, Stop, Current limits).
+  * `FFC2` (Notify): Receives PIN/password authorization feedback.
+  * `FFC1` (Write): Used to send the login credentials.
+
+### 3. `run_charge_controller()`
+* **Task:** The main control loop runs every 5 seconds.
+* **Operation:** Reads telemetry from `shared_state`, evaluates active automation rules (Auto, Scheduled, Force), and pushes packets into the `ble_command_queue` when state changes occur.
+* **Unified Solar Auto Rules:** The solar charging logic evaluates three protection rules sequentially and independently:
+  1. *Grid Import Limit:* Charging stops if grid import exceeds the `stop_import_limit`.
+  2. *Battery Stop SoC:* Charging stops if the home battery SoC drops below the `stop_soc` limit.
+  3. *House UPS Overload Protection:* Charging stops immediately if the UPS load exceeds the `house_power_limit_w` threshold.
+* **Grid Charge Delayed Shutdown:** Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, provided the grid power threshold is greater than 0.
+* **HTML Input Step Values:** The HTML input step values for Watt parameters are set to `step=1`, allowing single Watt resolution settings (e.g., 80 W).
+* **Manual Override Handling (Soft Stop / Restart):** Processes manual overrides (`apply_with_stop`, `apply_with_restart`) at the very beginning of the loop, before mode evaluation or the early `continue` in `monitoring` mode. This guarantees that clicking "Soft Stop" stops charging immediately, even without active automation rules.
+* **Manual Start Race Condition Fix:** Implements the `manual_start_requested` state flag to guard the BLE transmission, preventing the startup sequence from being prematurely reset to `schedule` mode by the loop's cleanup checks before the START command packet is successfully sent via BLE.
+
+---
+
+## 3. BESEN BLE Protocol and Login Handshake
+
+The BESEN BS20 uses a custom, proprietary binary framing protocol over BLE. The following authorization handshake must execute successfully before the charger accepts commands:
+
+**Shanghai Timezone Timestamp:**
+The BESEN EVSE MCU checks the received Unix timestamp in the START command. If the difference is too large (e.g., Budapest vs. Shanghai), it rejects the packet.
+To address this, we introduced the `get_shanghai_timestamp()` function, which converts the local time to a Unix timestamp with an 8-hour offset (Shanghai timezone). We use this adjusted timestamp for START commands instead of `ts = int(time.time())`.
+
+### A) Login Handshake Sequence
+
+```
+  Vezérlő Szoftver (Bleak)                           BESEN BS20 Töltő
+          |                                                  |
+          | <--------------- BLE Connection ---------------->|
+          |                                                  |
+          | <--- Notify FFE4 (0x0002 Identity Request) ------|
+   [INIT] |                                                  |
+          | ---- Write FFF3 (0x0002 Identity ACK) ---------->|
+[SENT_ACK]| (Replying with the device serial number)         |
+          |                                                  |
+          | <--- Notify FFE4 (0x0002 Identity Success) ------|
+ [ACKED]  |                                                  |
+          | ---- Write FFC1 (0x0001 Login Request) --------->|
+          |      (6-byte obfuscated PIN code)                |
+[SENT_LGN]|                                                  |
+          | <--- Notify FFC2 (0x00 Auth Success) ------------|
+[LOGGED]  |                                                  |
+          v                                                  v
+     (Auth Accepted: Full telemetry stream and write permissions active)
+```
+
+### B) Binary Packet Structure (Frame format)
+All sent and received packets share a fixed binary frame format:
+
+**Dynamic Line ID (Phase Detection):**
+The first byte of the command payload is the line identifier (`line_id`), which must be `0x01` for single-phase charging and `0x02` for three-phase charging. The system determines this dynamically based on the measured L2 and L3 phase voltages from the inverter. If active 3-phase voltages are detected (>50V), `line_id` is set to `2` (`0x02`), otherwise it defaults to `1` (`0x01`).
+
+**START Command Payload Structure:**
+The payload (`payload = packet[21:]`) for the charger start command (START, `0x8007`) follows this specific binary layout:
+*   `payload[0]`: Phase count identifier (`line_id`).
+*   `payload[1:17]`: Username (modified to `"BDmanager"`, ASCII-encoded, padded with 0x00 bytes).
+*   `payload[17:33]`: Dynamic session charging ID (format: `YYYYMMDDHHMM1337`).
+*   `payload[33]`: Default startup flag (`0x00`).
+*   `payload[34:38]`: Shanghai timezone Unix timestamp (4-byte integer, Big-Endian format).
+*   `payload[38]`: Auto-start flag (`0x01`).
+*   `payload[39]`: Online mode indicator (`0x01`).
+*   `payload[40:46]`: Limit bypass control bytes (`0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF`).
+*   `payload[46]`: Maximum charging current limit (`charger_max_amps`).
+
+| Byte Offset | Length | Description | Value / Example |
+|---|---|---|---|
+| **0 - 1** | 2 bytes | Packet Header | `0x06, 0x01` |
+| **2 - 3** | 2 bytes | Total Frame Length (Big-Endian) | e.g., `0x00, 0x2F` (47 bytes) |
+| **4** | 1 byte | Key Type | `0x00` |
+| **5 - 12** | 8 bytes | Charger unique serial number | e.g., `0x30, 0x99, 0x83...` |
+| **13 - 18** | 6 bytes | Charger password (PIN) | e.g., `0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF` (ASCII representation) |
+| **19 - 20** | 2 bytes | Command ID | e.g., `0x80, 0x07` (Start), `0x80, 0x08` (Stop) |
+| **21 - N** | Variable | Command Payload | Parameter bytes, status values |
+| **N+1 - N+2** | 2 bytes | Modbus CRC16 Checksum | Calculated from byte 0 to end of payload |
+| **N+3 - N+4** | 2 bytes | Packet Tail | `0x0F, 0x02` |
+
+### C) Telemetry Payload Structure (Command ID: 0x0004 & 0x000D)
+The telemetry payload (`payload = packet[21:]`) contains the live status measurements:
+*   `payload[1:3]`: L1 voltage (scale: 0.1, V)
 *   `payload[3:5]`: L1 current (scale: 0.01, A)
 *   `payload[5:9]`: Real-time active power (Big-Endian, W)
 *   `payload[9:13]`: L1 charging energy register (Big-Endian, scale: 0.01, Wh). *Note: On 3-phase setups, the controller multiplies this by 3.0 to obtain the total session energy.*
@@ -202,6 +351,11 @@ If `"web_auth_enabled"` is active in the configuration, the server validates the
 **Privacy / Name change:**
 For security and privacy reasons, all previous username entries of "Attila" have been replaced with "BDmanager" in authentication and commands (e.g., `start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")`). This matches the default setting in the slespersen/evseMQTT project.
 * **Exception**: Fetching `/background.png` is allowed without authentication so that the login screen background can load properly.
+
+### End-to-End API Encryption (E2EE)
+To protect the traffic between the Web Dashboard's client-side JavaScript and the Python HTTP server from local network sniffing, the system uses built-in, military-grade cryptography:
+1.  **Password Verification:** The user's password (plaintext) is never transmitted over the network. The browser sends an HMAC-SHA256 based `auth_proof` (generated using a `client_nonce` provided by the server and a 100,000-iteration PBKDF2-SHA256 session key).
+2.  **Transparent Payload Encryption:** Upon successful login, the overridden `fetch()` API on the client side automatically encrypts every HTTP POST body. Previously, the browser's native WebCrypto API was used (AES-GCM), but due to mobile browsers (e.g., Chrome, Vivaldi) blocking it over HTTP, the client side transitioned to a fully independent CryptoJS implementation. The payload is now encrypted using AES-256-CBC (with PKCS7 padding), coupled with a subsequent HMAC-SHA256 (Encrypt-then-MAC) checksum to prevent manipulations. The server decrypts requests using the `pycryptodome` package, and the JSON responses are securely transmitted back to the client fully encrypted and signed with a dedicated MAC.
 
 ### Responsiveness and Mobile Navigation (Client-Side)
 The Web Dashboard uses responsive CSS design with a breakpoint at `1024px`. Above this width, it displays a side-by-side desktop layout; below it, it transitions to a single-card mobile layout.

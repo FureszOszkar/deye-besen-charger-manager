@@ -116,13 +116,9 @@ For immediate manual intervention and testing.
 *   **Ideiglenes leállítás (Soft Stop):** Stops the current charge session but does not suspend automation rules. If Solar Auto conditions are met again later, charging can automatically restart.
 
 The software recently had the following changes implemented:
-1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are evaluated sequentially and independently (sequential rules).
-2. Setting "Grid charge delayed shutdown (minutes)" / "Hálózati töltés késleltetett leállítása (perc)" to 0 minutes means IMMEDIATE shutdown (0 minutes delay) rather than disabling the check. The check is active when grid power threshold > 0.
-3. HTML input step values for Watt parameters were changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
-
 ---
 
-## 6. Built-in Safety Guards
+## 6. Built-in Safety Guards and Security
 
 The software features multiple safety mechanisms to protect the hardware, the electrical grid, and prevent unauthorized manipulation or accidental mis-clicks:
 
@@ -131,15 +127,17 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   Upon successful login, the server assigns a cryptographically secure session token to the browser, authorizing it to view telemetry and control the system.
     *   A **Kijelentkezés (Logout)** button in the header allows users to immediately clear their session.
     *   If authentication is not required, it can be disabled in the configuration (`"web_auth_enabled": false`).
-2.  **Relay Protection (Cooldown):** After any stopped or failed charging attempt, the program enforces a **2-minute (120 seconds) cooldown period**. During this time, no automation is allowed to restart charging, protecting the charger's physical relays from premature wear and welding.
-3.  **Fail-Safe Disarm:** If the charging fails to start within 60 seconds after a BLE start command, a failure is logged. If this happens 3 consecutive times, the system automatically stops further attempts and switches to **Figyelés (Monitoring)** mode to prevent endless BLE command cycles.
-4.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
+2.  **End-to-End Encryption (AES-GCM):** The communication between the web dashboard and the Python server is protected by built-in, military-grade encryption.
+    *   **Challenge-Response Login:** The user's password is never transmitted over the network. The browser generates an HMAC-based authentication proof (Auth Proof) and sends it instead.
+    *   **AES-256-GCM Payload Encryption:** Upon successful login, all API traffic (commands and telemetry) is encrypted and decrypted on the fly using a session key derived via PBKDF2-SHA256. This prevents local network sniffing.
+3.  **Relay Protection (Cooldown):** After any stopped or failed charging attempt, the program enforces a **2-minute (120 seconds) cooldown period**. During this time, no automation is allowed to restart charging, protecting the charger's physical relays from premature wear and welding.
+4.  **Fail-Safe Disarm:** If the charging fails to start within 60 seconds after a BLE start command, a failure is logged. If this happens 3 consecutive times, the system automatically stops further attempts and switches to **Figyelés (Monitoring)** mode to prevent endless BLE command cycles.
+5.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
     *   Deye inverter synchronous Modbus requests (`pysolarmanv5`) run on a separate background worker thread, ensuring network interruptions do not freeze the main event loop.
     *   All Bluetooth write and notification requests are constrained by a strict 5-second timeout limit.
     *   **Connection Timeout Protection:** `BleakClient` connection attempts (`client.connect()`) can occasionally hang indefinitely within the Windows Bluetooth stack. To mitigate this, connection attempts are wrapped in an explicit 20-second async timeout (`asyncio.wait_for`). If connection takes longer, it is aborted, the socket is cleaned up, and a fresh reconnection cycle is started.
     *   If the connection state is `LOGGED_IN` but no telemetry packets arrive from the charger for 15 seconds, the built-in watchdog logs a timeout, closes the dead connection, and cleanly restarts the BLE discovery and reconnection process.
     *   **Thread-Safe Telemetry Processing:** Notifications arriving from Bleak's background worker thread are dispatched back to the main event loop thread using `asyncio.run_coroutine_threadsafe` via the global `main_loop` reference, preventing thread-level `RuntimeError: no running event loop` exceptions.
-
 
 ---
 
@@ -177,7 +175,10 @@ Once compilation completes, copy the generated `deye_besen_controller.exe` from 
 
 ## 8. Configuration File (config.json) Guide
 
-Upon startup, the program reads the `config.json` file. If it does not exist, it will be automatically created with built-in default values (`DEFAULT_CONFIG`). The table below describes the function of each configuration key:
+Upon startup, the program reads the `config.json` file. If it does not exist, it will be automatically created with built-in default values (`DEFAULT_CONFIG`).
+
+Most configurations are accessible and can be changed directly from the Web Dashboard. However, there are some hidden advanced settings:
+*   `"pbkdf2_iterations"` - The strength of the password hashing/encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins.
 
 The software recently had the following changes implemented:
 1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently.
@@ -201,10 +202,4 @@ The software recently had the following changes implemented:
 
 If you encounter any logical bugs, unexpected behavior, or malfunctions during use, please **report them in the GitHub Issues section of this repository** so we can fix them! Thank you very much for your feedback!
 
-### Advanced Safety Mechanisms
-- **Anti-Flapping Cooldown:** Prevents rapid start/stop cycling by enforcing a 20-second cooldown window after 2 consecutive state changes.
-- **Safety Lockdown:** Completely locks the system if 5 state transitions occur within 40 seconds, or if 10 consecutive automated commands run without user input. Requires manual unlock from the dashboard.
-- **Total House Load Protection:** Overload safety evaluates (UPS Load + Charger Load) to protect the main breakers. Overload and manual Hard STOP commands always bypass the cooldown/lockdown constraints.
-- **Central Ping-Pong Watchdog (Supervisor):** A dedicated supervisor mechanism protects the software from fatal halts. It handles two types of software/network anomalies automatically:
-    - *Crash Protection:* If any background thread terminates unexpectedly with an exception (e.g., dropped network socket), the Watchdog catches the error without crashing the main program and immediately restarts the thread.
-    - *Freeze Protection:* Background threads cyclically leave a "PONG" timestamp in the shared memory during their operation. If the Watchdog detects no PONG signal from a thread for 30 seconds (e.g., stuck in an infinite TCP wait), it forcefully terminates the stuck thread and restarts it cleanly.
+

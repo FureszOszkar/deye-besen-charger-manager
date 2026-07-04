@@ -61,7 +61,7 @@ Ez a teljesen autonóm, "állítsd be és felejtsd el" mód. A vezérlő folyama
 *   **Leállítási feltételek:**
     *   Ha a ház áramfogyasztása túl magasra nők (Túlterhelés védelem).
     *   Ha az otthoni akkumulátor lemerül a megadott *Leállítási SoC küszöb* alá (pl. 50%).
-*   **Dinamikus Áramszabályozás (Load Balancing):** A szoftver automatikusan beállítja a töltő áramerősségét (Amper) a rendelkezésre álló napelemes többlet, az akkumulátor töltési/kisütési korlátai és az Inverter maximális teljesítménye alapján, hogy soha ne húzzon indokolatlanul a hálózatból, miközben maximalizálja a napelem hasznosítását.
+*   **Fix Áramkorlát (Nincs dinamikus szabályozás):** A szoftver a beállított fix maximális áramerősséggel indítja el a töltést (vagy az autó beépített fedélzeti töltőjének korlátjával). Az autó akkumulátorának és töltőelektronikájának védelme érdekében a vezérlő nem szabályozza folyamatosan fel-le a töltőáramot. A hálózati import elkerülését tisztán a BE/KI (Start/Stop) biztonsági limitek végzik.
 
 ### 2. Ütemezett (Scheduled) Mód
 Lehetővé teszi az olcsó éjszakai áramtarifák vagy meghatározott töltési ablakok kihasználását.
@@ -99,10 +99,19 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 *   **Max Hálózati Import (W)** - Hálózati türelem-határ. Ha efelett húzunk a hálózatról, leáll a töltés.
 *   **Hálózati Import Időkorlát (Perc)** - Mennyi ideig tolerálja a rendszer a fenti hálózati import túllépést, mielőtt leállítaná a töltést (pl. 5 perc, hogy a felhőátvonulásokat átvészelje).
 *   **Üzemmód Megjegyzése Újraindításkor** - Kapcsoló, amivel a vezérlő emlékszik a legutóbb használt módra (Auto/Schedule/Force).
+*   *Rejtett haladó beállítás (csak a `config.json`-ban módosítható)*: `"pbkdf2_iterations"` - A jelszó titkosítás erőssége (alapértelmezett: 100000). Gyengébb mikroszámítógépeken (pl. Raspberry Pi Zero) érdemes lehet csökkenteni (pl. 50000-re) a gyorsabb bejelentkezés érdekében.
 
 ---
 
-## 6. Hibakeresés és Biztonság
+## 6. Biztonság és Titkosítás (End-to-End Encryption)
+
+A rendszer beépített, végpontok közötti (End-to-End) titkosítással védi a webes felület és a Python szerver közötti kommunikációt. A helyi hálózaton az adatok lehallgatása (sniffing) ellen a következő védelmi vonalak működnek:
+- **Jelszóvédelem (Challenge-Response):** A felhasználói jelszó soha nem utazik a hálózaton. A bejelentkezés során a böngésző egy HMAC alapú hitelesítési bizonyítékot (Auth Proof) küld a szervernek.
+- **AES-256-GCM Titkosítás:** A sikeres bejelentkezést követően a böngésző és a szerver minden API forgalmat (parancsokat és visszatérő adatokat) erős, katonai szintű AES-256-GCM titkosítással rejt el a hálózaton. A titkosítás alapjául a bejelentkezéskor generált ideiglenes kulcs szolgál (PBKDF2-SHA256).
+
+---
+
+## 7. Hibakeresés és Műszerfal
 
 A műszerfalon található egy beépített "Konzol" és "Hibadobozok", amelyek valós idejű visszajelzést adnak:
 *   **Sárga Figyelmeztetés:** Lehűlési (Cooldown) időzítő aktív (megakadályozza, hogy a Bluetooth parancsok túl gyorsan spammeljék a töltőt).

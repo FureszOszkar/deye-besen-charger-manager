@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "schedule_enabled": False,
     "web_auth_enabled": True,
     "web_password": "admin",
+    "pbkdf2_iterations": 100000,
     "forced_schedule": [
         {"day": "Hétfő", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
         {"day": "Kedd", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
@@ -64,6 +65,9 @@ DEFAULT_PACKET_PASSWORD = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 
 # --- SHARED STATE (globális állapot) ---
 shared_state = {
+    # Watchdog PONG jelek
+    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time()},
+
     # Kapcsolatok állapota
     "inverter_connected": False,
     "charger_connected": False,
@@ -143,11 +147,12 @@ _last_initiated_session_id = ""
 charger_password = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 WEB_AUTH_ENABLED = True
 WEB_PASSWORD = "admin"
+PBKDF2_ITERATIONS = 100000
 
 # --- KONFIGURÁCIÓ KEZELÉS ---
 def load_config():
     global shared_state, CHARGER_NAME, CHARGER_MAC, charger_password
-    global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD
+    global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
     global _last_initiated_session_id
     config = DEFAULT_CONFIG.copy()
     
@@ -210,6 +215,7 @@ def load_config():
     # Webes hitelesítés paraméterek betöltése
     WEB_AUTH_ENABLED = bool(config.get("web_auth_enabled", True))
     WEB_PASSWORD = str(config.get("web_password", "admin"))
+    PBKDF2_ITERATIONS = int(config.get("pbkdf2_iterations", 100000))
     
     # Jelszó konverzió (Hex vagy plain text)
     pwd_str = config.get("charger_password", "FFFFFFFFFFFF")
@@ -269,6 +275,7 @@ def save_config_file():
             "schedule_enabled": shared_state["schedule_enabled"],
             "web_auth_enabled": WEB_AUTH_ENABLED,
             "web_password": WEB_PASSWORD,
+            "pbkdf2_iterations": PBKDF2_ITERATIONS,
             "started_by_controller": shared_state.get("started_by_controller", False),
             "last_charge": shared_state.get("last_charge", {}),
             "last_initiated_session_id": _last_initiated_session_id,

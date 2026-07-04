@@ -60,7 +60,7 @@ Az `asyncio` futtatókörnyezetben három párhuzamos taszk fut végtelen ciklus
 *   **Feltételek (Auto Módban):**
     1.  Ellenőrzi a biztonsági korlátokat: Túlterhelés védelem (`ups_load_power + charger_power > house_power_limit_w`) és Akku korlát (`battery_soc < stop_soc`). Ha bármelyik sérül, azonnali STOP parancsot küld a BLE sornak.
     2.  Ellenőrzi az indítási feltételeket: Ha az akkumulátor elérte az indulási szintet (`start_soc`), és még nem töltünk, START parancsot küld.
-    3.  Dinamikus áramszabályozás (Load Balancing): Ha épp töltünk, kiszámítja az ideális Amper limitet a megadott formulák alapján. Ha a kívánt Amper eltér a jelenlegi `active_current_limit`-től, leállítja a töltést, 15 másodpercet vár, majd újraindítja az új Amper értékkel.
+    3.  Statikus Áramkorlát: Nincs automatikus fel-le szabályozás (Load Balancing). Ha épp töltünk, a szoftver a beállított fix maximum áramerősséget használja, és a biztonsági szabályok alapján csak lekapcsolja (Stop), ha a feltételek sérülnek.
 *   **Kimenet:** BLE parancscsomagokat (bytearray) tesz az `asyncio.Queue`-ba (`ble_command_queue`).
 
 ### 2.3 `besen_ble_worker()`
@@ -109,8 +109,8 @@ A START és STOP parancsok kódjai:
 
 ## 4. Szoftver Funkciók és Biztonság
 
-### 4.1 Dinamikus Áramkorlát (Dynamic Current Limit) Váltás
-A legtöbb "buta" töltőhöz hasonlóan, a BESEN BS20 **nem támogatja a töltési Amper megváltoztatását repülés (töltés) közben**. A szoftver úgy kerüli meg ezt a problémát, hogy ha a számított Amper érték változik, a vezérlő:
+### 4.1 Áramkorlát (Current Limit) Váltás
+A legtöbb "buta" töltőhöz hasonlóan, a BESEN BS20 **nem támogatja a töltési Amper megváltoztatását repülés (töltés) közben**. A szoftver úgy kerüli meg ezt a problémát, hogy ha a felhasználó a webes felületen megváltoztatja az Amper limitet, a vezérlő:
 1.  STOP parancsot küld a jelenlegi munkamenetre.
 2.  Beállít egy Cooldown időzítőt (pl. 15 másodperc), hogy a töltő reléi kioldjanak és a hardver visszaálljon.
 3.  15 másodperc múlva START parancsot küld az ÚJ Amper limit értékkel.
@@ -135,3 +135,8 @@ A ház túlterhelés védelmi logikája a teljes terhelést a `(UPS Terhelés + 
 A `main.py`-ban található egy dedikált végtelen ciklus, amely 5 másodpercenként felügyeli a három fő aszinkron feladat (Inverter, BLE, Töltésvezérlő) egészségét. A Watchdog kétféle hibát detektál:
 1. **Crash védelem:** Ha a feladat `task.done()` állapota True, ellenőrzi, hogy dobott-e kivételt (`task.result()`). Ha a szál egy hiba miatt leállt, a Watchdog elkapja a kivételt és újra létrehozza a feladatot.
 2. **Freeze (Befagyás) védelem:** Minden háttérszál a természetes futási ciklusának végén egy "PONG" időbélyeget frissít a `shared_state["task_pong"]` szótárban. Ha a Watchdog azt észleli, hogy egy szál több mint 30 másodperce nem küldött PONG jelet (pl. egy blokkoló hálózati művelet miatt), akkor a beragadt feladatot `task.cancel()` hívással megszakítja, és a következő ciklusban tisztán újraindítja. Ez az architektúra biztosítja a robusztus működést anélkül, hogy mesterséges pingeket kényszerítene a szálakba.
+
+### 4.7 Végpontok közötti API Titkosítás (E2EE)
+A webes Műszerfal kliens oldali JavaScript kódja és a Python HTTP szerver közötti forgalom hálózati lehallgatás (sniffing) elleni védelme beépített, katonai szintű kriptográfiát használ:
+1.  **Jelszó Ellenőrzés:** A jelszó (plaintext) soha nem kerül elküldésre a hálózaton. A böngésző egy HMAC-SHA256 alapú `auth_proof`-ot küld (amely a szerver által generált `client_nonce` alapján készül, a 100 000 iterációs PBKDF2-SHA256 kulccsal).
+2.  **Transzparens Payload Titkosítás:** A sikeres bejelentkezés után a kliens oldalon felülírt `fetch()` API automatikusan titkosít minden HTTP POST body-t. Korábban a böngésző natív WebCrypto API-ját használtuk (AES-GCM), de a mobil böngészők (pl. Chrome, Vivaldi) HTTP-n történő tiltása miatt a kliens oldal teljesen függetlenített CryptoJS alapokra állt át. A payload így AES-256-CBC módban (PKCS7 paddinggal) titkosítódik, amelyhez utólagos HMAC-SHA256 (Encrypt-then-MAC) ellenőrzőösszeg csatlakozik a manipulációk elkerülésére. A szerver a `pycryptodome` csomaggal fejti vissza a kéréseket, a válaszok JSON objektumai pedig ugyanígy titkosítva és dedikált MAC aláírással érkeznek vissza a klienshez.
