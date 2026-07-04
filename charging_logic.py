@@ -1114,7 +1114,7 @@ async def run_charge_controller():
                     stop_payload[0] = line_id
                     stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
                     packet = create_ble_packet(0x8008, bytes(stop_payload))
-                    if not await try_send_ble_action(packet, "STOP", is_manual_hard_stop=True):
+                    if not await try_send_ble_action(packet, "STOP", is_safety_stop=True):
                         continue
 
                     last_sent_action = "STOP"

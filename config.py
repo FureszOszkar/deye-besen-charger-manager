@@ -168,6 +168,11 @@ def load_config():
     with state_lock:
         shared_state["start_soc"] = int(config["start_soc"])
         shared_state["stop_soc"] = int(config.get("stop_soc", 0))
+        
+        # Validation: start_soc >= stop_soc
+        if shared_state["start_soc"] < shared_state["stop_soc"]:
+            shared_state["start_soc"] = shared_state["stop_soc"]
+
         shared_state["stop_import_limit"] = int(config["stop_import_limit"])
         shared_state["grid_charge_duration_minutes"] = int(config["grid_charge_duration_minutes"])
         shared_state["house_power_limit_w"] = int(config["house_power_limit_w"])

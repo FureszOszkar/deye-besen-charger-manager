@@ -3030,6 +3030,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const persist_mode_on_restart = document.getElementById('auto_persist_mode_on_restart').checked;
             const charger_max_amps = document.getElementById('auto_unmanaged_current').checked ? 0 : parseInt(document.getElementById('auto_charger_max_amps').value);
 
+            if (start_soc < stop_soc) {
+                alert("Hiba: A Start % (" + start_soc + "%) nem lehet kisebb a Leállítási küszöbnél (" + stop_soc + "%)!");
+                return;
+            }
+
             try {
                 const response = await fetch('/api/config', {
                     method: 'POST',
@@ -3444,6 +3449,11 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                         shared_state["start_soc"] = int(config_data["start_soc"])
                     if "stop_soc" in config_data:
                         shared_state["stop_soc"] = int(config_data["stop_soc"])
+                        
+                    # Biztonsági ellenőrzés: start_soc nem lehet kisebb, mint stop_soc
+                    if shared_state.get("start_soc", 100) < shared_state.get("stop_soc", 0):
+                        self._send_encrypted_json({"status": "error", "message": "Hiba: A Start % nem lehet kisebb a Stop %-nál!"})
+                        return
                     if "stop_import_limit" in config_data:
                         shared_state["stop_import_limit"] = int(config_data["stop_import_limit"])
                     if "grid_charge_duration_minutes" in config_data:
