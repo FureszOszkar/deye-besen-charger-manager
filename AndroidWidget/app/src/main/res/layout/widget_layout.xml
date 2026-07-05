@@ -63,14 +63,14 @@
                 android:rowOrderPreserved="false"
                 android:layout_gravity="center">
                 
-                <TextView android:id="@+id/tv_pv" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#FFEB3B" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_grid" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#2196F3" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_pv" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_grid" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
                 
-                <TextView android:id="@+id/tv_soc" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#4CAF50" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_batt_power" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#4CAF50" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_soc" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_batt_power" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
                 
-                <TextView android:id="@+id/tv_ups" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#FF9800" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_charger" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E91E63" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_ups" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_charger" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
             </GridLayout>
         </FrameLayout>
     </LinearLayout>
