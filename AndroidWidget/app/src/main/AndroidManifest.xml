@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Deye Widget"
+        android:label="Deye-Besen adatok"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
         android:usesCleartextTraffic="true">

@@ -35,7 +35,7 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="Deye Töltésvezérlő"
+                android:text="Deye-Besen adatok"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
                 android:textSize="14sp" />
@@ -53,18 +53,25 @@
             android:layout_height="match_parent"
             android:layout_marginTop="4dp">
 
-            <LinearLayout
+            <GridLayout
                 android:id="@+id/layout_data"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
-                <TextView android:id="@+id/tv_pv" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#FFEB3B" android:textSize="12sp" />
-                <TextView android:id="@+id/tv_grid" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#2196F3" android:textSize="12sp" />
-                <TextView android:id="@+id/tv_soc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#4CAF50" android:textSize="12sp" />
-                <TextView android:id="@+id/tv_batt_power" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#4CAF50" android:textSize="12sp" />
-                <TextView android:id="@+id/tv_ups" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#FF9800" android:textSize="12sp" />
-                <TextView android:id="@+id/tv_charger" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E91E63" android:textSize="12sp" />
-            </LinearLayout>
+                android:columnCount="2"
+                android:useDefaultMargins="true"
+                android:alignmentMode="alignBounds"
+                android:rowOrderPreserved="false"
+                android:layout_gravity="center">
+                
+                <TextView android:id="@+id/tv_pv" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#FFEB3B" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_grid" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#2196F3" android:textSize="14sp" android:textStyle="bold" />
+                
+                <TextView android:id="@+id/tv_soc" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#4CAF50" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_batt_power" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#4CAF50" android:textSize="14sp" android:textStyle="bold" />
+                
+                <TextView android:id="@+id/tv_ups" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#FF9800" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_charger" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E91E63" android:textSize="14sp" android:textStyle="bold" />
+            </GridLayout>
         </FrameLayout>
     </LinearLayout>
 </FrameLayout>
