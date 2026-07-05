@@ -31,7 +31,7 @@ class ScreenUnlockReceiver : BroadcastReceiver() {
                 val updateIntent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
                 updateIntent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
                 context.sendBroadcast(updateIntent)
-                handler?.postDelayed(this, 10000) // 10 másodpercenként frissít aktív képernyőnél
+                handler?.postDelayed(this, 5000) // 5 másodpercenként frissít aktív képernyőnél
             }
         }
         handler?.post(runnable!!)

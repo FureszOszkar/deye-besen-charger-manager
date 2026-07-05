@@ -17,14 +17,16 @@
         android:id="@+id/online_dark_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#80000000" />
+        android:background="#80000000"
+        android:visibility="gone" />
         
     <LinearLayout
         android:id="@+id/layout_content"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="8dp">
+        android:padding="8dp"
+        android:visibility="gone">
         
         <LinearLayout
             android:layout_width="match_parent"
@@ -41,11 +43,12 @@
                 android:textSize="14sp" />
             <ImageButton
                 android:id="@+id/btn_refresh"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:background="?android:attr/selectableItemBackground"
+                android:scaleType="fitCenter"
                 android:src="@android:drawable/ic_popup_sync"
-                android:tint="#FFFFFF" />
+                android:tint="#E2E8F0" />
         </LinearLayout>
 
         <FrameLayout
@@ -63,14 +66,14 @@
                 android:rowOrderPreserved="false"
                 android:layout_gravity="center">
                 
-                <TextView android:id="@+id/tv_pv" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_grid" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_pv" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_grid" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
                 
-                <TextView android:id="@+id/tv_soc" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_batt_power" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_soc" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_batt_power" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
                 
-                <TextView android:id="@+id/tv_ups" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
-                <TextView android:id="@+id/tv_charger" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_ups" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_charger" android:layout_width="0dp" android:layout_columnWeight="1" android:layout_height="wrap_content" android:text="" android:textColor="#E2E8F0" android:textSize="14sp" android:textStyle="bold" />
             </GridLayout>
         </FrameLayout>
     </LinearLayout>

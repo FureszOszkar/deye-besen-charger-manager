@@ -127,6 +127,15 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             views.setInt(R.id.img_background, "setImageAlpha", alpha)
             
+            val intent = Intent(context, UpdateReceiver::class.java)
+            intent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
+            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            val pendingIntent = android.app.PendingIntent.getBroadcast(
+                context, appWidgetId, intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
+            
             if (success && data != null) {
                 views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
                 views.setViewVisibility(R.id.layout_data, View.VISIBLE)
