@@ -13,7 +13,7 @@
         android:src="@drawable/widget_bg" />
         
     <!-- Automatikus online sötétítő réteg (50% fekete) -->
-    <View
+    <FrameLayout
         android:id="@+id/online_dark_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
