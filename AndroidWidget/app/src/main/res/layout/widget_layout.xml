@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_base"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    
+    <!-- A háttérkép, aminek az átlátszóságát a csúszka állítja -->
+    <ImageView
+        android:id="@+id/img_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter"
+        android:src="@drawable/widget_bg" />
+        
+    <!-- Automatikus online sötétítő réteg (50% fekete) -->
+    <View
+        android:id="@+id/online_dark_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#80000000" />
+        
+    <LinearLayout
+        android:id="@+id/layout_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="8dp">
+        
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Deye Töltésvezérlő"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="14sp" />
+            <ImageButton
+                android:id="@+id/btn_refresh"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:src="@android:drawable/ic_popup_sync"
+                android:tint="#FFFFFF" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginTop="4dp">
+
+            <LinearLayout
+                android:id="@+id/layout_data"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView android:id="@+id/tv_pv" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Napelem: -- W" android:textColor="#FFEB3B" android:textSize="12sp" />
+                <TextView android:id="@+id/tv_grid" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Hálózat: -- W" android:textColor="#2196F3" android:textSize="12sp" />
+                <TextView android:id="@+id/tv_soc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Akku SoC: -- %" android:textColor="#4CAF50" android:textSize="12sp" />
+                <TextView android:id="@+id/tv_batt_power" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Akku Telj.: -- W" android:textColor="#4CAF50" android:textSize="12sp" />
+                <TextView android:id="@+id/tv_ups" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ház: -- W" android:textColor="#FF9800" android:textSize="12sp" />
+                <TextView android:id="@+id/tv_charger" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Autó töltés: -- W" android:textColor="#E91E63" android:textSize="12sp" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

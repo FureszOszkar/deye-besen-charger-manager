@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Vezérlő IP Címe (pl. 192.168.1.100)" />
+    <EditText android:id="@+id/et_ip" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="API Jelszó" android:layout_marginTop="16dp" />
+    <EditText android:id="@+id/et_password" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" />
+    
+    <TextView android:id="@+id/tv_alpha_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Háttér átlátszóság: 85%" android:layout_marginTop="16dp" />
+    <SeekBar android:id="@+id/sb_alpha" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progress="221" android:layout_marginTop="8dp" />
+    
+    <Button android:id="@+id/btn_save" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Mentés és Hozzáadás" android:layout_marginTop="24dp" />
+</LinearLayout>
