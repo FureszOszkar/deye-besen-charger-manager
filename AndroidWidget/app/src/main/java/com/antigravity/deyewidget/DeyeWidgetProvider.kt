@@ -23,7 +23,7 @@ class DeyeWidgetProvider : AppWidgetProvider() {
             val alpha = prefs.getInt("bg_alpha", 255)
             views.setInt(R.id.img_background, "setImageAlpha", alpha)
             
-            val intent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
+            val intent = Intent(context, UpdateReceiver::class.java)
             intent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
             val pendingIntent = PendingIntent.getBroadcast(
                 context, appWidgetId, intent,
