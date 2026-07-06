@@ -7,8 +7,10 @@ import android.os.Handler
 import android.os.Looper
 
 class ScreenUnlockReceiver : BroadcastReceiver() {
-    private var handler: Handler? = null
-    private var runnable: Runnable? = null
+    companion object {
+        private var handler: Handler? = null
+        private var runnable: Runnable? = null
+    }
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
@@ -26,6 +28,7 @@ class ScreenUnlockReceiver : BroadcastReceiver() {
         if (handler == null) {
             handler = Handler(Looper.getMainLooper())
         }
+        stopFrequentPolling()
         runnable = object : Runnable {
             override fun run() {
                 val updateIntent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
