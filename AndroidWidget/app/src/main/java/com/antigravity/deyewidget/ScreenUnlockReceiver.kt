@@ -3,44 +3,33 @@ package com.antigravity.deyewidget
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
+import androidx.work.WorkManager
 
 class ScreenUnlockReceiver : BroadcastReceiver() {
+
     companion object {
-        private var handler: Handler? = null
-        private var runnable: Runnable? = null
+        var isScreenActive: Boolean = false
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        
+
         if (action == Intent.ACTION_USER_PRESENT) {
-            // Képernyő feloldva - sűrű frissítés indul (pl. 5 másodpercenként, amíg aktív)
-            startFrequentPolling(context.applicationContext)
+            // Képernyő feloldva – egyetlen Worker indul, belső hurokkal frissít
+            isScreenActive = true
+            val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
+            WorkManager.getInstance(context.applicationContext)
+                .enqueueUniqueWork("DeyeWidgetLoop", ExistingWorkPolicy.REPLACE, workRequest)
         } else if (action == Intent.ACTION_SCREEN_OFF) {
-            // Képernyő lezárva - sűrű frissítés leáll
-            stopFrequentPolling()
+            // Képernyő lezárva – Worker leáll
+            isScreenActive = false
+            WorkManager.getInstance(context.applicationContext)
+                .cancelUniqueWork("DeyeWidgetLoop")
+        } else if (action == Intent.ACTION_BOOT_COMPLETED) {
+            // Telefon újraindult, képernyő zárva – nem csinálunk semmit
+            isScreenActive = false
         }
-    }
-    
-    private fun startFrequentPolling(context: Context) {
-        if (handler == null) {
-            handler = Handler(Looper.getMainLooper())
-        }
-        stopFrequentPolling()
-        runnable = object : Runnable {
-            override fun run() {
-                val updateIntent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
-                updateIntent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                context.sendBroadcast(updateIntent)
-                handler?.postDelayed(this, 5000) // 5 másodpercenként frissít aktív képernyőnél
-            }
-        }
-        handler?.post(runnable!!)
-    }
-    
-    private fun stopFrequentPolling() {
-        runnable?.let { handler?.removeCallbacks(it) }
     }
 }

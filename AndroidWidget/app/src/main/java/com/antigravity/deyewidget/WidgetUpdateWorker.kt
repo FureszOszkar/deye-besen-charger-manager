@@ -24,30 +24,61 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
     Worker(appContext, workerParams) {
 
     companion object {
+        // Ezek osztályszintű változók – túlélik a REPLACE-et és az újraindítást
         private var sessionToken: String? = null
         private var sessionKey: ByteArray? = null
-        private var isOfflineStateDisplayed: Boolean = false
         private var lastSuccessTime: Long = 0L
     }
 
+    // A kézi frissítés gomb és a képernyő feloldás is ezen keresztül indít
     class UpdateReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == "com.antigravity.deyewidget.ACTION_REFRESH") {
+                // REPLACE: megszakítja az esetleges sleep()-et, azonnal új ciklus indul
                 val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
-                WorkManager.getInstance(context).enqueueUniqueWork("DeyeWidgetUpdate", ExistingWorkPolicy.REPLACE, workRequest)
+                WorkManager.getInstance(context.applicationContext)
+                    .enqueueUniqueWork("DeyeWidgetLoop", ExistingWorkPolicy.REPLACE, workRequest)
             }
         }
     }
 
     override fun doWork(): Result {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build()
+
+        // Belső frissítési hurok – addig fut, amíg a WorkManager le nem állítja
+        while (!isStopped) {
+            fetchAndUpdate(client)
+
+            // 5 másodperces várakozás, de isStopped()-ot figyeli
+            val sleepEnd = System.currentTimeMillis() + 5000
+            while (System.currentTimeMillis() < sleepEnd && !isStopped) {
+                Thread.sleep(100)
+            }
+        }
+
+        // Ha a WorkManager 10 perces korlátja miatt állt le (és nem azért mert képernyő lement),
+        // automatikusan újraindítjuk a Worker-t
+        if (ScreenUnlockReceiver.isScreenActive) {
+            val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
+            WorkManager.getInstance(applicationContext)
+                .enqueueUniqueWork("DeyeWidgetLoop", ExistingWorkPolicy.REPLACE, workRequest)
+        }
+
+        return Result.success()
+    }
+
+    private fun fetchAndUpdate(client: OkHttpClient) {
+        // WiFi ellenőrzés
         val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = cm.activeNetwork
-        val networkCapabilities = cm.getNetworkCapabilities(activeNetwork)
-        val hasWifi = networkCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        val hasWifi = cm.getNetworkCapabilities(cm.activeNetwork)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
 
         if (!hasWifi) {
-            updateUIOffline(applicationContext)
-            return Result.failure()
+            updateUIOffline()
+            return
         }
 
         val prefs = applicationContext.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
@@ -55,16 +86,12 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         val password = prefs.getString("password", "") ?: ""
         val baseUrl = "http://$ip:8080"
 
-        val client = OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .build()
-
         try {
+            // Login csak akkor, ha nincs érvényes session
             if (sessionToken == null || sessionKey == null) {
                 if (!doLogin(client, baseUrl, password)) {
-                    updateUIOffline(applicationContext)
-                    return Result.failure()
+                    updateUIOffline()
+                    return
                 }
             }
 
@@ -74,46 +101,45 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 .get()
                 .build()
 
-            var fetchSuccess = false
             client.newCall(request).execute().use { response ->
-                if (response.code == 401) {
-                    sessionToken = null
-                    sessionKey = null
-                    updateUIOffline(applicationContext)
-                    return Result.failure()
-                }
-
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string() ?: ""
-                    val encryptedJson = JSONObject(responseBody)
-                    val finalJson: JSONObject
-
-                    if (encryptedJson.has("enc") && encryptedJson.getBoolean("enc")) {
-                        val iv = encryptedJson.getString("iv")
-                        val data = encryptedJson.getString("data")
-                        val mac = encryptedJson.getString("mac")
-                        val decryptedString = CryptoUtils.decryptPayload(sessionKey!!, iv, data, mac)
-                        finalJson = JSONObject(decryptedString)
-                    } else {
-                        finalJson = JSONObject(responseBody)
+                when {
+                    response.code == 401 -> {
+                        // Session lejárt – töröljük, következő körben újra loginol
+                        sessionToken = null
+                        sessionKey = null
+                        updateUIOffline()
                     }
+                    response.isSuccessful -> {
+                        val responseBody = response.body?.string() ?: ""
+                        val encryptedJson = JSONObject(responseBody)
+                        val finalJson: JSONObject
 
-                    fetchSuccess = true
-                    lastSuccessTime = System.currentTimeMillis()
-                    updateUIOnline(applicationContext, finalJson)
-                } else {
-                    updateUIOffline(applicationContext)
+                        if (encryptedJson.has("enc") && encryptedJson.getBoolean("enc")) {
+                            val iv = encryptedJson.getString("iv")
+                            val data = encryptedJson.getString("data")
+                            val mac = encryptedJson.getString("mac")
+                            val decryptedString = CryptoUtils.decryptPayload(sessionKey!!, iv, data, mac)
+                            finalJson = JSONObject(decryptedString)
+                        } else {
+                            finalJson = JSONObject(responseBody)
+                        }
+
+                        // Sikeres frissítés – időt elmentjük memóriába és tartósan is
+                        lastSuccessTime = System.currentTimeMillis()
+                        prefs.edit().putLong("lastSuccessTime", lastSuccessTime).apply()
+                        updateUIOnline(finalJson)
+                    }
+                    else -> updateUIOffline()
                 }
             }
-            return if (fetchSuccess) Result.success() else Result.failure()
         } catch (e: Exception) {
             e.printStackTrace()
             if (e is SecurityException) {
+                // MAC ellenőrzés sikertelen – session érvénytelen
                 sessionToken = null
                 sessionKey = null
             }
-            updateUIOffline(applicationContext)
-            return Result.failure()
+            updateUIOffline()
         }
     }
 
@@ -151,16 +177,14 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         }
     }
 
-    private fun updateUIOnline(context: Context, data: JSONObject) {
-        isOfflineStateDisplayed = false
-
-        val appWidgetManager = AppWidgetManager.getInstance(context)
-        val componentName = ComponentName(context, DeyeWidgetProvider::class.java)
+    private fun updateUIOnline(data: JSONObject) {
+        val appWidgetManager = AppWidgetManager.getInstance(applicationContext)
+        val componentName = ComponentName(applicationContext, DeyeWidgetProvider::class.java)
         val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
 
         for (appWidgetId in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_layout)
-            // KIZÁRÓLAG a szövegeket frissítjük! Nincs setOnClickPendingIntent és nincs setImageAlpha!
+            val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
+            // Kizárólag a szövegeket frissítjük – nincs setImageAlpha, nincs setOnClickPendingIntent
             views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
             views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
             views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
@@ -171,27 +195,22 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         }
     }
 
-    private fun updateUIOffline(context: Context) {
-        // 15 másodperces türelmi idő hálózati megszakadás esetén
-        val isStale = System.currentTimeMillis() - lastSuccessTime > 15000
-        
-        if (!isStale) {
-            return // Még türelmi időn belül vagyunk, nem töröljük le az adatot
+    private fun updateUIOffline() {
+        // 15 másodperces türelmi idő – ha még friss az adat, nem töröljük le
+        val prefs = applicationContext.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
+        val storedLastSuccess = prefs.getLong("lastSuccessTime", lastSuccessTime)
+        val effectiveLastSuccess = maxOf(lastSuccessTime, storedLastSuccess)
+
+        if (System.currentTimeMillis() - effectiveLastSuccess < 15000) {
+            return // Grace period – megtartjuk a régi adatot
         }
 
-        if (isOfflineStateDisplayed) {
-            return // Már üresek a feliratok, nem küldünk felesleges parancsot
-        }
-
-        isOfflineStateDisplayed = true
-
-        val appWidgetManager = AppWidgetManager.getInstance(context)
-        val componentName = ComponentName(context, DeyeWidgetProvider::class.java)
+        val appWidgetManager = AppWidgetManager.getInstance(applicationContext)
+        val componentName = ComponentName(applicationContext, DeyeWidgetProvider::class.java)
         val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
 
         for (appWidgetId in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_layout)
-            // Offline esetén csak a számokat ürítjük ki (nem rejtjük el magát a View-t)
+            val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
             views.setTextViewText(R.id.tv_pv, "")
             views.setTextViewText(R.id.tv_grid, "")
             views.setTextViewText(R.id.tv_soc, "")
