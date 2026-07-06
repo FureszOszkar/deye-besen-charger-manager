@@ -43,9 +43,9 @@
                 android:textSize="14sp" />
             <ImageButton
                 android:id="@+id/btn_refresh"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:padding="6dp"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:padding="8dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:scaleType="fitCenter"
                 android:src="@android:drawable/ic_popup_sync"

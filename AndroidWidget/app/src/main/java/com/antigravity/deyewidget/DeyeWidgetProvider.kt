@@ -23,7 +23,7 @@ class DeyeWidgetProvider : AppWidgetProvider() {
             val alpha = prefs.getInt("bg_alpha", 255)
             views.setInt(R.id.img_background, "setImageAlpha", alpha)
             
-            val intent = Intent(context, DeyeWidgetProvider::class.java)
+            val intent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
             intent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
             val pendingIntent = PendingIntent.getBroadcast(
                 context, appWidgetId, intent,
@@ -32,17 +32,6 @@ class DeyeWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
             
             appWidgetManager.updateAppWidget(appWidgetId, views)
-
-            // És el is indítunk egy háttérbeli frissítést
-            context.sendBroadcast(intent)
-        }
-    }
-
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
-        if (intent.action == "com.antigravity.deyewidget.ACTION_REFRESH") {
-            // Manuális frissítés gomb megnyomva
-            WidgetUpdater.fetchAndUpdate(context)
         }
     }
 }
