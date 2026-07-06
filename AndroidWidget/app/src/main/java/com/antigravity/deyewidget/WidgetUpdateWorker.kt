@@ -30,6 +30,11 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         private var sessionKey: ByteArray? = null
         // Nyomon követjük az előző online/offline állapotot, hogy csak szükség esetén csináljunk teljes újrarajzolást
         private var lastWasOnline: Boolean? = null
+        // Singleton OkHttpClient: saját szálkészletet és kapcsolatpool-t tart fenn, nem kell minden hívásnál újat létrehozni
+        private val httpClient: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build()
     }
 
     override fun doWork(): Result {
@@ -41,11 +46,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         val ip = prefs.getString("ip", "192.168.1.100") ?: "192.168.1.100"
         val password = prefs.getString("password", "") ?: ""
         val baseUrl = "http://$ip:8080"
-
-        val client = OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .build()
+        val client = httpClient
 
         val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val activeNetwork = cm.activeNetwork
@@ -74,17 +75,22 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                     .post(loginJson.toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val loginResponse = client.newCall(loginRequest).execute()
-                if (!loginResponse.isSuccessful) {
-                    sessionToken = null
-                    sessionKey = null
+                val loginResult = client.newCall(loginRequest).execute().use { loginResponse ->
+                    if (!loginResponse.isSuccessful) {
+                        sessionToken = null
+                        sessionKey = null
+                        null // jelzi a sikertelen bejelentkezést
+                    } else {
+                        val setCookie = loginResponse.header("Set-Cookie")
+                        Pair(setCookie?.split(";")?.firstOrNull() ?: "", key)
+                    }
+                }
+                if (loginResult == null) {
                     updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
                     return Result.failure()
                 }
-
-                val setCookie = loginResponse.header("Set-Cookie")
-                sessionToken = setCookie?.split(";")?.firstOrNull() ?: ""
-                sessionKey = key
+                sessionToken = loginResult.first
+                sessionKey = loginResult.second
             }
 
             // FETCH DATA WITH SESSION
@@ -94,32 +100,38 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            
-            if (response.code == 401) {
-                sessionToken = null
-                sessionKey = null
-                return Result.failure()
-            }
-
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string() ?: ""
-                val encryptedJson = JSONObject(responseBody)
-                
-                if (encryptedJson.has("enc") && encryptedJson.getBoolean("enc")) {
-                    val iv = encryptedJson.getString("iv")
-                    val data = encryptedJson.getString("data")
-                    val mac = encryptedJson.getString("mac")
-                    
-                    val decryptedString = CryptoUtils.decryptPayload(sessionKey!!, iv, data, mac)
-                    val json = JSONObject(decryptedString)
-                    updateUI(applicationContext, appWidgetManager, appWidgetIds, json, true)
-                } else {
-                    val json = JSONObject(responseBody)
-                    updateUI(applicationContext, appWidgetManager, appWidgetIds, json, true)
+            var fetchSuccess = false
+            client.newCall(request).execute().use { response ->
+                if (response.code == 401) {
+                    sessionToken = null
+                    sessionKey = null
+                    return@use // kilépünk a use blokkból, a body le lesz zárva
                 }
-            } else {
-                updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
+
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string() ?: ""
+                    val encryptedJson = JSONObject(responseBody)
+
+                    if (encryptedJson.has("enc") && encryptedJson.getBoolean("enc")) {
+                        val iv = encryptedJson.getString("iv")
+                        val data = encryptedJson.getString("data")
+                        val mac = encryptedJson.getString("mac")
+
+                        val decryptedString = CryptoUtils.decryptPayload(sessionKey!!, iv, data, mac)
+                        val json = JSONObject(decryptedString)
+                        updateUI(applicationContext, appWidgetManager, appWidgetIds, json, true)
+                    } else {
+                        val json = JSONObject(responseBody)
+                        updateUI(applicationContext, appWidgetManager, appWidgetIds, json, true)
+                    }
+                    fetchSuccess = true
+                } else {
+                    updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
+                }
+            }
+            // 401 esetén sessionToken már null -> következő futásnál újra bejelentkezik
+            if (sessionToken == null && sessionKey == null) {
+                return Result.failure()
             }
         } catch (e: Exception) {
             e.printStackTrace()
