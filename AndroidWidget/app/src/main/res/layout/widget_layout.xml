@@ -28,29 +28,15 @@
         android:padding="8dp"
         android:visibility="visible">
         
-        <LinearLayout
+        <TextView
+            android:id="@+id/tv_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-            <TextView
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:text="Deye-Besen adatok"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"
-                android:textSize="14sp" />
-            <ImageButton
-                android:id="@+id/btn_refresh"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:padding="8dp"
-                android:background="?android:attr/selectableItemBackground"
-                android:scaleType="fitCenter"
-                android:src="@android:drawable/ic_popup_sync"
-                android:tint="#E2E8F0" />
-        </LinearLayout>
+            android:text="Deye-Besen adatok"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:visibility="visible" />
 
         <FrameLayout
             android:layout_width="match_parent"

@@ -43,13 +43,6 @@
             </intent-filter>
         </receiver>
 
-        <receiver
-            android:name=".WidgetUpdateWorker$UpdateReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.antigravity.deyewidget.ACTION_REFRESH" />
-            </intent-filter>
-        </receiver>
 
     </application>
 </manifest>

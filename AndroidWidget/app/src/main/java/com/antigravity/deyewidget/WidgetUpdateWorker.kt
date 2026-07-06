@@ -1,10 +1,8 @@
 package com.antigravity.deyewidget
 
 import android.appwidget.AppWidgetManager
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.widget.RemoteViews
@@ -28,18 +26,6 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         private var sessionToken: String? = null
         private var sessionKey: ByteArray? = null
         private var lastSuccessTime: Long = 0L
-    }
-
-    // A kézi frissítés gomb és a képernyő feloldás is ezen keresztül indít
-    class UpdateReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == "com.antigravity.deyewidget.ACTION_REFRESH") {
-                // REPLACE: megszakítja az esetleges sleep()-et, azonnal új ciklus indul
-                val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
-                WorkManager.getInstance(context.applicationContext)
-                    .enqueueUniqueWork("DeyeWidgetLoop", ExistingWorkPolicy.REPLACE, workRequest)
-            }
-        }
     }
 
     override fun doWork(): Result {
@@ -184,7 +170,8 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
-            // Kizárólag a szövegeket frissítjük – nincs setImageAlpha, nincs setOnClickPendingIntent
+            // Kizárólag a szövegeket frissítük – nincs setImageAlpha, nincs setOnClickPendingIntent
+            views.setViewVisibility(R.id.tv_title, android.view.View.VISIBLE)
             views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
             views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
             views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
@@ -211,6 +198,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
+            views.setViewVisibility(R.id.tv_title, android.view.View.GONE)
             views.setTextViewText(R.id.tv_pv, "")
             views.setTextViewText(R.id.tv_grid, "")
             views.setTextViewText(R.id.tv_soc, "")
