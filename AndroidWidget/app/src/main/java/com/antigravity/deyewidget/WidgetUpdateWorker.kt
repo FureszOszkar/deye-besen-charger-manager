@@ -184,29 +184,28 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             val lastSuccessTime = prefs.getLong("last_success_time", 0L)
             val isStale = System.currentTimeMillis() - lastSuccessTime > 15000
 
-            for (appWidgetId in appWidgetIds) {
-                val views = RemoteViews(context.packageName, R.layout.widget_layout)
-                views.setInt(R.id.img_background, "setImageAlpha", alpha)
-                val intent = Intent(context, UpdateReceiver::class.java).apply {
-                    action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                }
-                val pendingIntent = android.app.PendingIntent.getBroadcast(
-                    context, appWidgetId, intent,
-                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                )
-                views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
-                if (isStale) {
-                    // 15 másodpercnél régebbi adat: tartalmat elrejtjük
+            if (isStale) {
+                // 15 másodpercnél régebbi adat: tartalmat elrejtjük, offline nézet
+                for (appWidgetId in appWidgetIds) {
+                    val views = RemoteViews(context.packageName, R.layout.widget_layout)
+                    views.setInt(R.id.img_background, "setImageAlpha", alpha)
+                    val intent = Intent(context, UpdateReceiver::class.java).apply {
+                        action = "com.antigravity.deyewidget.ACTION_REFRESH"
+                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                    }
+                    val pendingIntent = android.app.PendingIntent.getBroadcast(
+                        context, appWidgetId, intent,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                    )
+                    views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
                     views.setViewVisibility(R.id.layout_content, View.GONE)
                     views.setViewVisibility(R.id.layout_data, View.GONE)
                     views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
-                } else {
-                    // Rövid kiesés: csak a sötétítőt rejtjük el, az adatok maradnak
-                    views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                    appWidgetManager.updateAppWidget(appWidgetId, views)
                 }
-                appWidgetManager.updateAppWidget(appWidgetId, views)
             }
+            // Ha friss az adat (15mp-en belüli siker): NE nyúljunk a widgethez,
+            // az utolsó sikeres állapot megmarad a képernyőn.
         }
     }
 

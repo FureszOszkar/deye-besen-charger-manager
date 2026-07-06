@@ -17,10 +17,22 @@ class DeyeWidgetProvider : AppWidgetProvider() {
 
     companion object {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
-            // Trigger actual update in background, do NOT overwrite layout with default XML to prevent flashing
-            val updateIntent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
-            updateIntent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
-            context.sendBroadcast(updateIntent)
+            // Regisztráljuk a frissítés gomb eseményét anélkül, hogy a teljes layoutot felülírnánk (így elkerüljük a villogást)
+            val views = RemoteViews(context.packageName, R.layout.widget_layout)
+            
+            val intent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
+            intent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
+            val pendingIntent = PendingIntent.getBroadcast(
+                context, appWidgetId, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
+            
+            // A partiallyUpdateAppWidget csak a módosított tulajdonságot (kattintás) érvényesíti a meglévő widgeten
+            appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+
+            // És el is indítunk egy háttérbeli frissítést
+            context.sendBroadcast(intent)
         }
     }
 }
