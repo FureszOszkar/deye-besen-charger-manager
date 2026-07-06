@@ -136,8 +136,14 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             )
             views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
             
+            val prefs = context.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
+            
             if (success && data != null) {
+                // Mentsük el a sikeres frissítés idejét
+                prefs.edit().putLong("last_success_time", System.currentTimeMillis()).apply()
+                
                 views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
+                views.setViewVisibility(R.id.layout_content, View.VISIBLE)
                 views.setViewVisibility(R.id.layout_data, View.VISIBLE)
                 views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
                 views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
@@ -146,8 +152,16 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
                 views.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
             } else {
-                views.setViewVisibility(R.id.layout_data, View.GONE)
-                views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                // Csak akkor rejtsük el az adatokat, ha már eltelt X idő (pl. 15 másodperc) az utolsó sikeres frissítés óta
+                val lastSuccessTime = prefs.getLong("last_success_time", 0L)
+                if (System.currentTimeMillis() - lastSuccessTime > 15000) {
+                    views.setViewVisibility(R.id.layout_content, View.GONE)
+                    views.setViewVisibility(R.id.layout_data, View.GONE)
+                    views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                } else {
+                    // Ha még friss a hiba (pillanatnyi szakadás), csak a sötétítést vesszük le jelezve a gondot
+                    views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                }
             }
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
