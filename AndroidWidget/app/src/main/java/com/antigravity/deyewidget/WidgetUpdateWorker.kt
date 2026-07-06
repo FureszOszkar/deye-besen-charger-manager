@@ -28,8 +28,6 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
     companion object {
         private var sessionToken: String? = null
         private var sessionKey: ByteArray? = null
-        // Nyomon követjük az előző online/offline állapotot, hogy csak szükség esetén csináljunk teljes újrarajzolást
-        private var lastWasOnline: Boolean? = null
         // Singleton OkHttpClient: saját szálkészletet és kapcsolatpool-t tart fenn, nem kell minden hívásnál újat létrehozni
         private val httpClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
@@ -153,80 +151,62 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         if (success && data != null) {
             // --- SIKERES FRISSÍTÉS ---
+            // Mindig teljes updateAppWidget: a launcher bármikor visszaallíthatja a widget
+            // állapotát az XML-alapra (visibility=gone), ezért a partiallyUpdateAppWidget
+            // nem megbízható. Mivel a Provider már nem reseteli a layoutot, ez villogásmentes.
             prefs.edit().putLong("last_success_time", System.currentTimeMillis()).apply()
 
-            val isFirstOnline = lastWasOnline != true
-            lastWasOnline = true
-
             for (appWidgetId in appWidgetIds) {
-                if (isFirstOnline) {
-                    // Első online megjelenés: TELJES újrarajzolás kell (láthatóságok beállítása)
-                    val views = RemoteViews(context.packageName, R.layout.widget_layout)
-                    views.setInt(R.id.img_background, "setImageAlpha", alpha)
-                    val intent = Intent(context, UpdateReceiver::class.java).apply {
-                        action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    }
-                    val pendingIntent = android.app.PendingIntent.getBroadcast(
-                        context, appWidgetId, intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                    views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
-                    views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
-                    views.setViewVisibility(R.id.layout_content, View.VISIBLE)
-                    views.setViewVisibility(R.id.layout_data, View.VISIBLE)
-                    views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
-                    views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
-                    views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
-                    views.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
-                    views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
-                    views.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
-                } else {
-                    // Már online volt: CSAK az értékeket frissítjük, villogás nélkül
-                    val partialViews = RemoteViews(context.packageName, R.layout.widget_layout)
-                    partialViews.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
-                    partialViews.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
-                    partialViews.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
-                    partialViews.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
-                    partialViews.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
-                    partialViews.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
-                    appWidgetManager.partiallyUpdateAppWidget(appWidgetId, partialViews)
+                val views = RemoteViews(context.packageName, R.layout.widget_layout)
+                views.setInt(R.id.img_background, "setImageAlpha", alpha)
+                val intent = Intent(context, UpdateReceiver::class.java).apply {
+                    action = "com.antigravity.deyewidget.ACTION_REFRESH"
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 }
+                val pendingIntent = android.app.PendingIntent.getBroadcast(
+                    context, appWidgetId, intent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
+                views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
+                views.setViewVisibility(R.id.layout_content, View.VISIBLE)
+                views.setViewVisibility(R.id.layout_data, View.VISIBLE)
+                views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
+                views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
+                views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
+                views.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
+                views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
+                views.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
+                appWidgetManager.updateAppWidget(appWidgetId, views)
             }
         } else {
             // --- SIKERTELEN FRISSÍTÉS / OFFLINE ---
             val lastSuccessTime = prefs.getLong("last_success_time", 0L)
             val isStale = System.currentTimeMillis() - lastSuccessTime > 15000
 
-            val needsStructuralChange = lastWasOnline != false
-            lastWasOnline = false
-
-            if (needsStructuralChange) {
-                // Állapotváltás online->offline: TELJES újrarajzolás szükséges
-                for (appWidgetId in appWidgetIds) {
-                    val views = RemoteViews(context.packageName, R.layout.widget_layout)
-                    views.setInt(R.id.img_background, "setImageAlpha", alpha)
-                    val intent = Intent(context, UpdateReceiver::class.java).apply {
-                        action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    }
-                    val pendingIntent = android.app.PendingIntent.getBroadcast(
-                        context, appWidgetId, intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                    views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
-                    if (isStale) {
-                        views.setViewVisibility(R.id.layout_content, View.GONE)
-                        views.setViewVisibility(R.id.layout_data, View.GONE)
-                        views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
-                    } else {
-                        views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
-                    }
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
+            for (appWidgetId in appWidgetIds) {
+                val views = RemoteViews(context.packageName, R.layout.widget_layout)
+                views.setInt(R.id.img_background, "setImageAlpha", alpha)
+                val intent = Intent(context, UpdateReceiver::class.java).apply {
+                    action = "com.antigravity.deyewidget.ACTION_REFRESH"
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 }
+                val pendingIntent = android.app.PendingIntent.getBroadcast(
+                    context, appWidgetId, intent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
+                if (isStale) {
+                    // 15 másodpercnél régebbi adat: tartalmat elrejtjük
+                    views.setViewVisibility(R.id.layout_content, View.GONE)
+                    views.setViewVisibility(R.id.layout_data, View.GONE)
+                    views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                } else {
+                    // Rövid kiesés: csak a sötétítőt rejtjük el, az adatok maradnak
+                    views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
+                }
+                appWidgetManager.updateAppWidget(appWidgetId, views)
             }
-            // Ha már offline volt, nem csinálunk semmit - a widget marad ahogy van
         }
     }
 
