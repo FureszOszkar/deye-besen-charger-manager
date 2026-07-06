@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.view.View
 import android.widget.RemoteViews
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
@@ -27,8 +26,8 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
     companion object {
         private var sessionToken: String? = null
         private var sessionKey: ByteArray? = null
-        private var lastDataHash: Int = 0
         private var isOfflineStateDisplayed: Boolean = false
+        private var lastSuccessTime: Long = 0L
     }
 
     class UpdateReceiver : BroadcastReceiver() {
@@ -100,6 +99,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                     }
 
                     fetchSuccess = true
+                    lastSuccessTime = System.currentTimeMillis()
                     updateUIOnline(applicationContext, finalJson)
                 } else {
                     updateUIOffline(applicationContext)
@@ -152,13 +152,6 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
     }
 
     private fun updateUIOnline(context: Context, data: JSONObject) {
-        val currentHash = data.toString().hashCode()
-        if (currentHash == lastDataHash && !isOfflineStateDisplayed) {
-            // Nem változott semmi az előző sikeres lekérdezés óta, ÉS jelenleg is online vagyunk. Nincs teendő.
-            return
-        }
-
-        lastDataHash = currentHash
         isOfflineStateDisplayed = false
 
         val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -167,9 +160,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
-            views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
-            views.setViewVisibility(R.id.layout_content, View.VISIBLE)
-            views.setViewVisibility(R.id.layout_data, View.VISIBLE)
+            // KIZÁRÓLAG a szövegeket frissítjük! Nincs setOnClickPendingIntent és nincs setImageAlpha!
             views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
             views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
             views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
@@ -181,13 +172,18 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
     }
 
     private fun updateUIOffline(context: Context) {
+        // 15 másodperces türelmi idő hálózati megszakadás esetén
+        val isStale = System.currentTimeMillis() - lastSuccessTime > 15000
+        
+        if (!isStale) {
+            return // Még türelmi időn belül vagyunk, nem töröljük le az adatot
+        }
+
         if (isOfflineStateDisplayed) {
-            // Már kiürítettük a feliratokat, nincs értelme minden másodpercben újraküldeni a parancsot (villogás elkerülése).
-            return
+            return // Már üresek a feliratok, nem küldünk felesleges parancsot
         }
 
         isOfflineStateDisplayed = true
-        lastDataHash = 0
 
         val appWidgetManager = AppWidgetManager.getInstance(context)
         val componentName = ComponentName(context, DeyeWidgetProvider::class.java)
@@ -195,7 +191,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
-            // Csendben kiürítjük a szövegeket, hogy ne villogjon a doboz eltüntetése miatt a Launcher hibája okán
+            // Offline esetén csak a számokat ürítjük ki (nem rejtjük el magát a View-t)
             views.setTextViewText(R.id.tv_pv, "")
             views.setTextViewText(R.id.tv_grid, "")
             views.setTextViewText(R.id.tv_soc, "")
