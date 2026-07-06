@@ -31,9 +31,8 @@ class ScreenUnlockReceiver : BroadcastReceiver() {
         stopFrequentPolling()
         runnable = object : Runnable {
             override fun run() {
-                val updateIntent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
-                updateIntent.action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                context.sendBroadcast(updateIntent)
+                // Közvetlen Coroutine indítás a WorkManager broadcast helyett
+                WidgetUpdater.fetchAndUpdate(context)
                 handler?.postDelayed(this, 5000) // 5 másodpercenként frissít aktív képernyőnél
             }
         }
