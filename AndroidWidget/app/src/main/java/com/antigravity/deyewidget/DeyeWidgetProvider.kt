@@ -17,9 +17,11 @@ class DeyeWidgetProvider : AppWidgetProvider() {
 
     companion object {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
-            // Teljes update, hogy a rendszer regisztrálja a widget alap layoutját,
-            // de mivel az XML-ben most már visible a tartalom, ez önmagában nem fog villogni.
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
+            
+            val prefs = context.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
+            val alpha = prefs.getInt("bg_alpha", 255)
+            views.setInt(R.id.img_background, "setImageAlpha", alpha)
             
             val intent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
             intent.action = "com.antigravity.deyewidget.ACTION_REFRESH"

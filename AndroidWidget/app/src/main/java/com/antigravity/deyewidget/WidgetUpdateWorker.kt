@@ -147,26 +147,14 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
     private fun updateUI(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray, data: JSONObject?, success: Boolean) {
         val prefs = context.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
-        val alpha = prefs.getInt("bg_alpha", 255)
 
         if (success && data != null) {
             // --- SIKERES FRISSÍTÉS ---
-            // A partiallyUpdateAppWidget csak azokat a paramétereket frissíti a widgeten, amiket itt megadunk.
-            // Nem rajzolja újra a teljes XML fát, így nem villog a képernyő minden 5 másodpercben.
             prefs.edit().putLong("last_success_time", System.currentTimeMillis()).apply()
 
             for (appWidgetId in appWidgetIds) {
+                // Csak a View láthatóságok és a szövegek frissülnek részlegesen
                 val views = RemoteViews(context.packageName, R.layout.widget_layout)
-                views.setInt(R.id.img_background, "setImageAlpha", alpha)
-                val intent = Intent(context, UpdateReceiver::class.java).apply {
-                    action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                }
-                val pendingIntent = android.app.PendingIntent.getBroadcast(
-                    context, appWidgetId, intent,
-                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                )
-                views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
                 views.setViewVisibility(R.id.online_dark_overlay, View.VISIBLE)
                 views.setViewVisibility(R.id.layout_content, View.VISIBLE)
                 views.setViewVisibility(R.id.layout_data, View.VISIBLE)
@@ -187,24 +175,14 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 // 15 másodpercnél régebbi adat: tartalmat elrejtjük, offline nézet
                 for (appWidgetId in appWidgetIds) {
                     val views = RemoteViews(context.packageName, R.layout.widget_layout)
-                    views.setInt(R.id.img_background, "setImageAlpha", alpha)
-                    val intent = Intent(context, UpdateReceiver::class.java).apply {
-                        action = "com.antigravity.deyewidget.ACTION_REFRESH"
-                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    }
-                    val pendingIntent = android.app.PendingIntent.getBroadcast(
-                        context, appWidgetId, intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-                    )
-                    views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
                     views.setViewVisibility(R.id.layout_content, View.GONE)
                     views.setViewVisibility(R.id.layout_data, View.GONE)
                     views.setViewVisibility(R.id.online_dark_overlay, View.GONE)
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
+                    
+                    // JAVÍTÁS: updateAppWidget helyett partiallyUpdateAppWidget
+                    appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
                 }
             }
-            // Ha friss az adat (15mp-en belüli siker): NE nyúljunk a widgethez,
-            // az utolsó sikeres állapot megmarad a képernyőn.
         }
     }
 
