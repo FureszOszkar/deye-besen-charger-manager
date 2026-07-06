@@ -17,7 +17,8 @@ class DeyeWidgetProvider : AppWidgetProvider() {
 
     companion object {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
-            // Regisztráljuk a frissítés gomb eseményét anélkül, hogy a teljes layoutot felülírnánk (így elkerüljük a villogást)
+            // Teljes update, hogy a rendszer regisztrálja a widget alap layoutját,
+            // de mivel az XML-ben most már visible a tartalom, ez önmagában nem fog villogni.
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             
             val intent = Intent(context, WidgetUpdateWorker.UpdateReceiver::class.java)
@@ -28,8 +29,7 @@ class DeyeWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.btn_refresh, pendingIntent)
             
-            // A partiallyUpdateAppWidget csak a módosított tulajdonságot (kattintás) érvényesíti a meglévő widgeten
-            appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+            appWidgetManager.updateAppWidget(appWidgetId, views)
 
             // És el is indítunk egy háttérbeli frissítést
             context.sendBroadcast(intent)

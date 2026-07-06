@@ -151,9 +151,8 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         if (success && data != null) {
             // --- SIKERES FRISSÍTÉS ---
-            // Mindig teljes updateAppWidget: a launcher bármikor visszaallíthatja a widget
-            // állapotát az XML-alapra (visibility=gone), ezért a partiallyUpdateAppWidget
-            // nem megbízható. Mivel a Provider már nem reseteli a layoutot, ez villogásmentes.
+            // A partiallyUpdateAppWidget csak azokat a paramétereket frissíti a widgeten, amiket itt megadunk.
+            // Nem rajzolja újra a teljes XML fát, így nem villog a képernyő minden 5 másodpercben.
             prefs.edit().putLong("last_success_time", System.currentTimeMillis()).apply()
 
             for (appWidgetId in appWidgetIds) {
@@ -177,7 +176,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 views.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
                 views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
                 views.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
-                appWidgetManager.updateAppWidget(appWidgetId, views)
+                appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
             }
         } else {
             // --- SIKERTELEN FRISSÍTÉS / OFFLINE ---
