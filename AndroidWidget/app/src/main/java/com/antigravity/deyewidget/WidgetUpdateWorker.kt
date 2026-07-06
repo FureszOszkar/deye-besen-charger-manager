@@ -170,14 +170,15 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
-            // Kizárólag a szövegeket frissítük – nincs setImageAlpha, nincs setOnClickPendingIntent
+            val chargerVal = if (data.optInt("charger_power", 0) < 100) 0 else data.optInt("charger_power", 0)
+            views.setViewVisibility(R.id.online_dark_overlay, android.view.View.VISIBLE)
             views.setViewVisibility(R.id.tv_title, android.view.View.VISIBLE)
             views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
             views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
             views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
             views.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
             views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
-            views.setTextViewText(R.id.tv_charger, "Autó töltés: ${data.optInt("charger_power", 0)} W")
+            views.setTextViewText(R.id.tv_charger, "Autó töltés: $chargerVal W")
             appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
         }
     }
@@ -198,6 +199,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
+            views.setViewVisibility(R.id.online_dark_overlay, android.view.View.GONE)
             views.setViewVisibility(R.id.tv_title, android.view.View.GONE)
             views.setTextViewText(R.id.tv_pv, "")
             views.setTextViewText(R.id.tv_grid, "")
