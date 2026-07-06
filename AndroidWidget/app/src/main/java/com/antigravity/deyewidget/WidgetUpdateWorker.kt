@@ -8,10 +8,13 @@ import android.content.Intent
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -42,6 +45,16 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             .readTimeout(5, TimeUnit.SECONDS)
             .build()
 
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork
+        val networkCapabilities = cm.getNetworkCapabilities(activeNetwork)
+        val hasWifi = networkCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+
+        if (!hasWifi) {
+            updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
+            return Result.failure()
+        }
+
         try {
             // LOGIN IF NO SESSION
             if (sessionToken == null || sessionKey == null) {
@@ -64,7 +77,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                     sessionToken = null
                     sessionKey = null
                     updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
-                    return Result.retry()
+                    return Result.failure()
                 }
 
                 val setCookie = loginResponse.header("Set-Cookie")
@@ -84,7 +97,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             if (response.code == 401) {
                 sessionToken = null
                 sessionKey = null
-                return Result.retry()
+                return Result.failure()
             }
 
             if (response.isSuccessful) {
@@ -113,7 +126,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 sessionKey = null
             }
             updateUI(applicationContext, appWidgetManager, appWidgetIds, null, false)
-            return Result.retry()
+            return Result.failure()
         }
 
         return Result.success()
@@ -171,7 +184,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == "com.antigravity.deyewidget.ACTION_REFRESH") {
                 val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
-                WorkManager.getInstance(context).enqueue(workRequest)
+                WorkManager.getInstance(context).enqueueUniqueWork("DeyeWidgetUpdate", ExistingWorkPolicy.REPLACE, workRequest)
             }
         }
     }
