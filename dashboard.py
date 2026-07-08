@@ -1,9 +1,11 @@
 import json
+import re
 import secrets
 import os
 import base64
 import hashlib
 import hmac as hmac_module
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 from Crypto.Cipher import AES
@@ -15,8 +17,79 @@ from config import (
     WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
 )
 
+# --- ÜTEMEZÉS VALIDÁCIÓ ---
+FORCED_SCHEDULE_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
+_TIME_PATTERN = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+
+
+def validate_forced_schedule(schedule):
+    """Ellenőrzi és normalizálja a kliensből érkező heti ütemezés listát.
+    ValueError-t dob, ha a struktúra érvénytelen (rossz típus, hiányzó/duplikált nap,
+    hibás időformátum, tartományon kívüli áramerősség), hogy hibás adat sose kerülhessen
+    a shared_state-be vagy a config.json-be (ami újraindításkor a program összeomlását
+    és a dashboardon tárolt XSS-t is okozhat, ha nincs validálva)."""
+    if not isinstance(schedule, list) or len(schedule) != 7:
+        raise ValueError("Az ütemezésnek pontosan 7 elemű listának kell lennie.")
+
+    seen_days = set()
+    validated = []
+    for item in schedule:
+        if not isinstance(item, dict):
+            raise ValueError("Az ütemezés minden eleme objektum kell legyen.")
+
+        day = item.get("day")
+        if day not in FORCED_SCHEDULE_DAYS:
+            raise ValueError(f"Érvénytelen nap: {day!r}")
+        if day in seen_days:
+            raise ValueError(f"Duplikált nap az ütemezésben: {day}")
+        seen_days.add(day)
+
+        start = item.get("start")
+        stop = item.get("stop")
+        if not isinstance(start, str) or not _TIME_PATTERN.match(start):
+            raise ValueError(f"Érvénytelen kezdési időpont ({day}): {start!r}")
+        if not isinstance(stop, str) or not _TIME_PATTERN.match(stop):
+            raise ValueError(f"Érvénytelen befejezési időpont ({day}): {stop!r}")
+
+        try:
+            amps = int(item.get("amps", 16))
+        except (TypeError, ValueError):
+            raise ValueError(f"Érvénytelen áramerősség érték ({day}): {item.get('amps')!r}")
+        if not (6 <= amps <= 16):
+            raise ValueError(f"Az áramerősség 6-16A között kell legyen ({day}): {amps}")
+
+        validated.append({
+            "day": day,
+            "enabled": bool(item.get("enabled", False)),
+            "start": start,
+            "stop": stop,
+            "amps": amps,
+            "override_auto": bool(item.get("override_auto", True))
+        })
+
+    if len(seen_days) != 7:
+        raise ValueError("Az ütemezésnek a hét mind a 7 napját pontosan egyszer kell tartalmaznia.")
+
+    return validated
+
+
 # --- WEBES HITELESÍTÉS ---
-active_sessions = {}  # {token: session_key_bytes}
+SESSION_TTL_SECONDS = 24 * 3600  # Session-ek 24 óra után lejárnak
+
+active_sessions = {}  # {token: {"key": session_key_bytes, "expires": epoch_seconds}}
+
+
+def get_valid_session(token):
+    """Visszaadja a session kulcsát, ha a token létezik és nem járt le; lejárt tokent törli."""
+    if not token:
+        return None
+    session = active_sessions.get(token)
+    if session is None:
+        return None
+    if time.time() > session["expires"]:
+        active_sessions.pop(token, None)
+        return None
+    return session["key"]
 
 # --- PSK TITKOSÍTÁSI MODUL ---
 def derive_session_key(password, client_nonce, iterations):
@@ -2060,7 +2133,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 row.className = 'schedule-row';
                 
                 row.innerHTML = `
-                    <label>${sched.day}</label>
+                    <label class="sched-day-label"></label>
                     <input type="checkbox" id="sched_enabled_${index}" ${sched.enabled ? 'checked' : ''}>
                     <input type="time" id="sched_start_${index}" value="${sched.start}">
                     <input type="time" id="sched_stop_${index}" value="${sched.stop}">
@@ -2076,6 +2149,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </label>
                     </div>
                 `;
+                // A napnevet textContent-tel írjuk be (nem innerHTML-be interpolálva),
+                // hogy egy esetleg mégis átcsúszó rosszindulatú 'day' érték se hajtódjon végre HTML/script-ként.
+                row.querySelector('.sched-day-label').textContent = sched.day;
                 container.appendChild(row);
             });
         }
@@ -3253,16 +3329,12 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
         if not WEB_AUTH_ENABLED:
             return True
         session_token = self.get_cookie('session')
-        if session_token and session_token in active_sessions:
-            return True
-        return False
+        return get_valid_session(session_token) is not None
 
     def get_session_key(self):
-        """Visszaadja az aktuális session titkosítási kulcsát."""
+        """Visszaadja az aktuális session titkosítási kulcsát (lejárt session esetén None-t)."""
         session_token = self.get_cookie('session')
-        if session_token:
-            return active_sessions.get(session_token)
-        return None
+        return get_valid_session(session_token)
 
     def _read_encrypted_body(self):
         """POST body olvasása és visszafejtése, ha titkosított."""
@@ -3329,6 +3401,16 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 self.send_error(404, "Fájl nem található")
             return
 
+        if self.path == '/api/login_info':
+            # Autentikáció nélkül elérhető: a kliensnek (webes login oldal, Android widget)
+            # ismernie kell a PBKDF2 iterációszámot a session kulcs származtatásához, MÉG a
+            # bejelentkezés előtt. Nem titkos érték, a LOGIN_HTML is tartalmazza ugyanezt.
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"pbkdf2_iterations": PBKDF2_ITERATIONS}).encode('utf-8'))
+            return
+
         # Ellenőrizzük az autentikációt minden más GET végpontnál
         if not self.is_authenticated():
             if self.path == '/':
@@ -3378,9 +3460,9 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     session_key = derive_session_key(WEB_PASSWORD, client_nonce, PBKDF2_ITERATIONS)
                     
                     if verify_auth_proof(session_key, auth_proof):
-                        # Sikeres hitelesítés: session kulcs eltárolása
+                        # Sikeres hitelesítés: session kulcs eltárolása lejárati idővel
                         token = secrets.token_hex(16)
-                        active_sessions[token] = session_key
+                        active_sessions[token] = {"key": session_key, "expires": time.time() + SESSION_TTL_SECONDS}
                         
                         self.send_response(200)
                         self.send_header('Content-type', 'application/json')
@@ -3407,18 +3489,6 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": f"Hiba: {e}"}).encode('utf-8'))
             return
                 
-        elif self.path == '/api/unlock':
-            with state_lock:
-                shared_state["lockdown_active"] = False
-                shared_state["transition_timestamps"].clear()
-                shared_state["consecutive_auto_commands"] = 0
-            log_message("🔐 Biztonsági zárolás (lockdown) és cooldown feloldva a felhasználó által.")
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            return
-
         # Minden más POST végpont ellenőrzése
         if not self.is_authenticated():
             self.send_response(401)
@@ -3439,6 +3509,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             log_message("Sikeres webes kijelentkezés.")
+            return
+
+        elif self.path == '/api/unlock':
+            with state_lock:
+                shared_state["lockdown_active"] = False
+                shared_state["transition_timestamps"].clear()
+                shared_state["consecutive_auto_commands"] = 0
+            log_message("🔐 Biztonsági zárolás (lockdown) és cooldown feloldva a felhasználó által.")
+            self._send_encrypted_json({"status": "success"})
             return
 
         elif self.path == '/api/config':
@@ -3467,7 +3546,11 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     if "force_submode" in config_data:
                         shared_state["force_submode"] = config_data["force_submode"]
                     if "forced_schedule" in config_data:
-                        shared_state["forced_schedule"] = config_data["forced_schedule"]
+                        try:
+                            shared_state["forced_schedule"] = validate_forced_schedule(config_data["forced_schedule"])
+                        except ValueError as ve:
+                            self._send_encrypted_json({"status": "error", "message": f"Hiba az ütemezésben: {ve}"})
+                            return
                     if "schedule_solar_auto" in config_data:
                         shared_state["schedule_solar_auto"] = bool(config_data["schedule_solar_auto"])
                     if "auto_enabled" in config_data:
@@ -3616,30 +3699,6 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 self._send_encrypted_json({"status": "success"})
             except Exception as e:
                 self.send_error(400, f"Hiba: {e}")
-
-    def log_message(self, format, *args):
-        pass
-
-    def get_cookie(self, name):
-        cookie_header = self.headers.get('Cookie')
-        if not cookie_header:
-            return None
-        parts = cookie_header.split(';')
-        for part in parts:
-            part = part.strip()
-            if '=' in part:
-                k, v = part.split('=', 1)
-                if k == name:
-                    return v
-        return None
-
-    def is_authenticated(self):
-        if not WEB_AUTH_ENABLED:
-            return True
-        session_token = self.get_cookie('session')
-        if session_token and session_token in active_sessions:
-            return True
-        return False
 
 # --- WEBSZERVER INDÍTÁS ---
 

@@ -130,6 +130,9 @@ The software features multiple safety mechanisms to protect the hardware, the el
 2.  **End-to-End Encryption (AES-GCM):** The communication between the web dashboard and the Python server is protected by built-in, military-grade encryption.
     *   **Challenge-Response Login:** The user's password is never transmitted over the network. The browser generates an HMAC-based authentication proof (Auth Proof) and sends it instead.
     *   **AES-256-GCM Payload Encryption:** Upon successful login, all API traffic (commands and telemetry) is encrypted and decrypted on the fly using a session key derived via PBKDF2-SHA256. This prevents local network sniffing.
+    *   **Session Expiry:** Login session tokens now expire automatically after 24 hours, after which the client must log in again.
+    *   **Authenticated Unlock Only:** Clearing a safety Lockdown (`/api/unlock`) also requires an authenticated session — no one on the local network can release it without logging in.
+    *   **Weekly Schedule Validation:** The server strictly validates the weekly schedule payload (weekday names, time format, current range) before saving it, protecting the system from malformed or malicious data.
 3.  **Relay Protection (Cooldown):** After any stopped or failed charging attempt, the program enforces a **2-minute (120 seconds) cooldown period**. During this time, no automation is allowed to restart charging, protecting the charger's physical relays from premature wear and welding.
 4.  **Fail-Safe Disarm:** If the charging fails to start within 60 seconds after a BLE start command, a failure is logged. If this happens 3 consecutive times, the system automatically stops further attempts and switches to **Figyelés (Monitoring)** mode to prevent endless BLE command cycles.
 5.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
@@ -178,12 +181,18 @@ Once compilation completes, copy the generated `deye_besen_controller.exe` from 
 Upon startup, the program reads the `config.json` file. If it does not exist, it will be automatically created with built-in default values (`DEFAULT_CONFIG`).
 
 Most configurations are accessible and can be changed directly from the Web Dashboard. However, there are some hidden advanced settings:
-*   `"pbkdf2_iterations"` - The strength of the password hashing/encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins.
+*   `"pbkdf2_iterations"` - The strength of the password hashing/encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins. This value is safe to change: the web dashboard and the widget in the `AndroidWidget` folder both fetch the current setting dynamically from the server at login time, so no client-side value needs to match it.
 
 The software recently had the following changes implemented:
 1. Solar Auto rules (Grid Import Limit, Battery Stop SoC, House UPS Overload Protection) are now evaluated sequentially and independently.
 2. Setting "Grid charge delayed shutdown (minutes)" to 0 minutes results in an IMMEDIATE shutdown rather than disabling the check, which remains active when the grid power threshold is greater than 0.
 3. HTML input step values for Watt parameters have been changed to step=1, allowing single Watt resolution settings (e.g., 80 W).
+4. Fixed a `NameError` crash risk in `run_charge_controller()` caused by phase-detection (`line_id`) being computed after code paths that could already reference it.
+5. Fixed an authentication bypass on `POST /api/unlock`, which previously let anyone on the local network clear a safety Lockdown without logging in.
+6. Added strict server-side validation for the weekly schedule (`forced_schedule`) payload, closing a stored-XSS vector and a restart-crash risk caused by unvalidated data being persisted to `config.json`.
+7. Login sessions now expire after 24 hours instead of lasting indefinitely.
+8. Removed unnecessary `config.json` disk writes that previously occurred on every non-charging BLE telemetry packet (roughly once per second), reducing SD-card wear on low-power hosts like a Raspberry Pi.
+9. The `AndroidWidget` app now fetches the server's PBKDF2 iteration count dynamically instead of assuming a hardcoded default, and no longer allows Android backup of the stored dashboard password (`android:allowBackup="false"`).
 
 ---
 

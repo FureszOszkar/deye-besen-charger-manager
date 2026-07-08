@@ -571,7 +571,11 @@ async def run_charge_controller():
             manual_start_requested = shared_state.get("manual_start_requested", False)
             restart_pending_start = shared_state.get("restart_pending_start", False)
 
-        # line_id meghatározása áthelyezve a ciklus elejére
+        # Határozzuk meg a fázisszámot (line_id: 1 = 1-fázis, 2 = 3-fázis) a mért feszültségek alapján
+        with state_lock:
+            v2 = shared_state["voltages"][1]
+            v3 = shared_state["voltages"][2]
+        line_id = 2 if (v2 > 50.0 or v3 > 50.0) else 1
 
         # --- ALKALMAZÁSI ÉS ÚJRAINDÍTÁSI FLAGEK FELDOLGOZÁSA (Előrehozva a korai returnök elé) ---
         # 1. Kézi leállítás (Soft Stop)
@@ -900,12 +904,6 @@ async def run_charge_controller():
         actual_action = "KEEP"
 
         # --- ÜZEMMÓD-ALAPÚ DÖNTÉSEK ---
-
-        # Határozzuk meg a fázisszámot (line_id: 1 = 1-fázis, 2 = 3-fázis) a mért feszültségek alapján
-        with state_lock:
-            v2 = shared_state["voltages"][1]
-            v3 = shared_state["voltages"][2]
-        line_id = 2 if (v2 > 50.0 or v3 > 50.0) else 1
 
         # Határozzuk meg, hogy a Solar Auto szabályokat kell-e alkalmaznunk
         use_solar_auto_rules = False
@@ -1430,8 +1428,10 @@ async def process_assembled_packet(packet, client):
             else:
                 session_energy_accumulator = 0.0
                 last_telemetry_time = None
+                session_was_active = False
                 with state_lock:
                     if shared_state["session_energy_accumulator"] > 0 or shared_state["session_last_time"] > 0:
+                        session_was_active = True
                         shared_state["energy_total"] = 0.0
                         shared_state["session_energy_accumulator"] = 0.0
                         shared_state["session_last_time"] = 0.0
@@ -1443,7 +1443,10 @@ async def process_assembled_packet(packet, client):
                     shared_state["temperature_internal"] = temp_int
                     shared_state["charging_active"] = False
                     shared_state["active_current_limit"] = 0
-                save_config_file()
+                # Csak akkor mentünk lemezre, ha ténylegesen volt aktív munkamenet, amit le kellett zárni
+                # (nem minden nem-töltő telemetria csomagnál, ami másodpercenként érkezik)
+                if session_was_active:
+                    save_config_file()
 
 
 # BLE Értesítéskezelő (GATT NOTIFY) callback
@@ -1515,10 +1518,3 @@ def ble_notification_received(sender, data_bytes):
                             print(f"Hiba a csomag aszinkron indításakor: {e}")
         else:
             print("Figyelmeztetés: Hibás csomagvégződés, elvetve.")
-
-    """
-    Kész- VÁZLAT: Ezt az eredeti process_assembled_packet() függvény teljes kódjával kell helyettesíteni.
-    Feladata: Beérkező BLE csomagok feldolgozása és állapotgép kezelése.
-    """
-
-    pass

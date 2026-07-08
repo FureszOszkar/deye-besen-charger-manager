@@ -2,8 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
-<img width="1884" height="900" alt="kép" src="https://github.com/user-attachments/assets/0de44493-eaba-473e-892b-60f5f91c2ef7" />
-
 
 ---
 
@@ -101,7 +99,7 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 *   **Max Hálózati Import (W)** - Hálózati türelem-határ. Ha efelett húzunk a hálózatról, leáll a töltés.
 *   **Hálózati Import Időkorlát (Perc)** - Mennyi ideig tolerálja a rendszer a fenti hálózati import túllépést, mielőtt leállítaná a töltést (pl. 5 perc, hogy a felhőátvonulásokat átvészelje).
 *   **Üzemmód Megjegyzése Újraindításkor** - Kapcsoló, amivel a vezérlő emlékszik a legutóbb használt módra (Auto/Schedule/Force).
-*   *Rejtett haladó beállítás (csak a `config.json`-ban módosítható)*: `"pbkdf2_iterations"` - A jelszó titkosítás erőssége (alapértelmezett: 100000). Gyengébb mikroszámítógépeken (pl. Raspberry Pi Zero) érdemes lehet csökkenteni (pl. 50000-re) a gyorsabb bejelentkezés érdekében.
+*   *Rejtett haladó beállítás (csak a `config.json`-ban módosítható)*: `"pbkdf2_iterations"` - A jelszó titkosítás erőssége (alapértelmezett: 100000). Gyengébb mikroszámítógépeken (pl. Raspberry Pi Zero) érdemes lehet csökkenteni (pl. 50000-re) a gyorsabb bejelentkezés érdekében. Ez az érték szabadon módosítható: a webes felület és az `AndroidWidget` mappában található widget is dinamikusan lekérdezi az aktuális beállítást a szervertől bejelentkezéskor, nem kell hozzájuk illeszteni a kliens oldalt.
 
 ---
 
@@ -110,6 +108,9 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 A rendszer beépített, végpontok közötti (End-to-End) titkosítással védi a webes felület és a Python szerver közötti kommunikációt. A helyi hálózaton az adatok lehallgatása (sniffing) ellen a következő védelmi vonalak működnek:
 - **Jelszóvédelem (Challenge-Response):** A felhasználói jelszó soha nem utazik a hálózaton. A bejelentkezés során a böngésző egy HMAC alapú hitelesítési bizonyítékot (Auth Proof) küld a szervernek.
 - **AES-256-GCM Titkosítás:** A sikeres bejelentkezést követően a böngésző és a szerver minden API forgalmat (parancsokat és visszatérő adatokat) erős, katonai szintű AES-256-GCM titkosítással rejt el a hálózaton. A titkosítás alapjául a bejelentkezéskor generált ideiglenes kulcs szolgál (PBKDF2-SHA256).
+- **Session lejárat:** A bejelentkezés után kapott session token 24 óra után automatikusan lejár, ezt követően újra be kell jelentkezni.
+- **Feloldás csak bejelentkezve:** A biztonsági zárolás (Lockdown) feloldása (`/api/unlock`) is autentikációt igényel — a helyi hálózaton bejelentkezés nélkül senki nem tudja feloldani.
+- **Ütemezés (heti terv) validáció:** A heti ütemezés mentésekor a szerver szigorúan ellenőrzi a beküldött adatokat (napnevek, időformátum, áramerősség-tartomány), mielőtt elmentené — ez védi a rendszert a hibás vagy rosszindulatú adatoktól.
 
 ---
 

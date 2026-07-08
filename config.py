@@ -185,9 +185,15 @@ def load_config():
         
         # Győződjünk meg róla, hogy minden napnak van override_auto mezője
         sched = config.get("forced_schedule", DEFAULT_CONFIG["forced_schedule"])
-        for day_item in sched:
-            if "override_auto" not in day_item:
-                day_item["override_auto"] = True
+        try:
+            for day_item in sched:
+                if "override_auto" not in day_item:
+                    day_item["override_auto"] = True
+            if not isinstance(sched, list) or len(sched) != 7:
+                raise ValueError("A forced_schedule nem 7 elemű lista.")
+        except (TypeError, ValueError) as e:
+            print(f"Hibás forced_schedule a konfigurációs fájlban: {e}. Alapértelmezett ütemezés használata.")
+            sched = json.loads(json.dumps(DEFAULT_CONFIG["forced_schedule"]))
         shared_state["forced_schedule"] = sched
         
         # Indulási mód és flag-ek beállítása a persist_mode_on_restart flag alapján
