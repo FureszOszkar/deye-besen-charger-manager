@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:label="Deye-Besen adatok"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
