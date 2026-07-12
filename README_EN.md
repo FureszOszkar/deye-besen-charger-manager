@@ -196,6 +196,43 @@ The software recently had the following changes implemented:
 
 ---
 
+## 9. Android Widget
+
+The project also includes a standalone Android application (the `AndroidWidget` folder) that displays the system's live data through a **home-screen widget**, without needing to open the browser-based dashboard. The app's APK is built automatically by GitHub Actions.
+
+### What the widget shows
+
+Over the same encrypted connection the server uses, the widget displays values that refresh roughly once per second:
+*   **Napelem** (PV production, W)
+*   **Hálózat** (grid import/export, W)
+*   **Akku SoC** (battery state of charge, %)
+*   **Akku Telj.** (battery power, W)
+*   **Ház** (house consumption / UPS load, W)
+*   **Autó töltés** (BESEN charger's current power, W)
+
+### Installation and setup
+
+1.  Download and install the APK on the phone (from the GitHub Actions build artifact).
+2.  Place the **"Deye-Besen adatok"** widget on the home screen.
+3.  On the configuration screen that opens automatically, enter:
+    *   **Server IP address** – the local IP of the machine running the controller (the widget connects on port `8080`).
+    *   **Password** – the same dashboard password you use to log in to the web interface.
+    *   **Background transparency** – the slider adjusts the opacity of the widget's background image.
+4.  Tap **Save** to activate the widget.
+
+### Behavior
+
+*   The widget **only refreshes while the phone is on Wi-Fi** and the server is reachable. On a foreign network or mobile data it stays blank (transparent), then restores the data automatically once you return home.
+*   Refreshes happen while the screen is on, roughly every 5 seconds (paused on a locked phone to save battery).
+*   **Tapping** the widget forces an immediate manual refresh.
+*   The widget is resilient to **switching between Wi-Fi networks**: if you leave your own network's range and later return, the data recovers on its own within a few seconds.
+
+### Security note
+
+The widget stores the dashboard password locally, in the phone's private storage (`SharedPreferences`). The app disables Android backup (`android:allowBackup="false"`) so the password cannot be extracted via `adb backup`. Communication between the widget and the server is end-to-end encrypted (AES-256 + HMAC), the same way as the web interface.
+
+---
+
 ## Acknowledgments
 
 Special thanks for the [slespersen/evseMQTT](https://github.com/slespersen/evseMQTT) GitHub project! His work on reverse-engineering and implementing the Bluetooth Low Energy (BLE) protocol for the BESEN BS20 charger provides a solid foundation for our controller's BLE communication. Special thanks to the AI-powered pair programming assistant for refactoring the code, creating the asynchronous control and simulation loops, embedding safety guards, developing the premium glassmorphic web dashboard, and compiling the complete bilingual documentation.

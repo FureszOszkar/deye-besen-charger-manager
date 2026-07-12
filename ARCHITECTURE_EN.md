@@ -279,3 +279,44 @@ A review pass found and fixed the following issues. Summarized here since they a
 * **Dead code removal:** Two leftover draft/"VÁZLAT" code blocks (unreachable code after the main `while True` loops in `run_charge_controller()` and `ble_notification_received()`) and a duplicate, stale `is_authenticated()` / `get_cookie()` / `log_message()` method definition on `ControllerHTTPHandler` were removed. The duplicate handler methods were not merely dead weight — because Python resolves a class's last matching method definition, the duplicate `is_authenticated()` silently overrode the session-expiry-aware version, which would have made the session TTL fix above a no-op.
 * **Android widget — PBKDF2 iteration count:** The widget derived its session key using a hardcoded `100000` iteration count, while the server's `pbkdf2_iterations` is user-configurable (the main README recommends lowering it on weak hardware like a Raspberry Pi Zero). The widget now calls `GET /api/login_info` before deriving the key, with `100000` retained only as a fallback if that call fails.
 * **Android widget — `allowBackup`:** `AndroidManifest.xml` set `android:allowBackup="true"` while storing the dashboard password in plaintext `SharedPreferences`, making the password extractable via `adb backup` on a non-rooted device. Set to `"false"`.
+
+---
+
+## 8. Android Widget (`AndroidWidget/`)
+
+The project includes a standalone native Android app (Kotlin) that shows the system's live telemetry through a home-screen widget. It builds as its own APK: the GitHub Actions workflow (`.github/workflows/android_widget_build.yml`) runs `assembleDebug` on every push touching `AndroidWidget/**` and uploads the APK as an artifact.
+
+### 8.1 Components
+
+* **`DeyeWidgetProvider`** (`AppWidgetProvider`): manages the widget lifecycle. `onUpdate()` inflates the view, wires up the tap handler, then starts the refresh loop and the 15-minute keep-alive work with the `KEEP` policy. `onDisabled()` (when the last widget is removed) cancels both.
+* **`WidgetConfigActivity`**: the configuration screen shown when the widget is placed. Saves the server IP, dashboard password (plaintext), and background transparency (`bg_alpha`) into `SharedPreferences` named `DeyePrefs`.
+* **`WidgetUpdateWorker`** (`Worker`): the main refresh loop (see 8.3).
+* **`WidgetKeepAliveWorker`** (`Worker`): a 15-minute safety net that revives the main loop if it has died (see 8.4).
+* **`ScreenUnlockReceiver`** (`BroadcastReceiver`): a best-effort screen/boot event listener; the refresh chain does **not** rely on it exclusively (see 8.4).
+* **`CryptoUtils`**: the same key derivation and E2EE decryption the server uses (PBKDF2, AES-256-CBC, HMAC-SHA256).
+
+### 8.2 Data and authentication flow
+
+The widget uses the same encrypted protocol as the web interface:
+
+1. **`GET /api/login_info`** – fetches the server's current `pbkdf2_iterations` (fallback: `100000`) so key derivation matches the server even when the value differs from the default.
+2. **`POST /api/login`** – the widget generates a `clientNonce`, derives a session key from it and the password via PBKDF2, and sends an `authProof`. On success the server returns a `session=` cookie.
+3. **`GET /api/status`** – fetches the telemetry with the session cookie. If the response is `enc:true`, it is verified and decrypted with the session key (AES-256-CBC + HMAC-SHA256), and the widget view is updated via `partiallyUpdateAppWidget()`.
+
+On session expiry / `401`, the widget clears the in-memory token and key and re-authenticates on the next cycle.
+
+### 8.3 Refresh model
+
+`widget_info.xml` sets `updatePeriodMillis="0"` — the system performs **no** periodic update; the widget manages refreshes itself with a continuous loop. `WidgetUpdateWorker.doWork()` iterates (roughly every 5 seconds) while the screen is on (`PowerManager.isInteractive`) and Wi-Fi is available. On a locked screen the loop stops on its own (power saving); without Wi-Fi it shows a blank/transparent state.
+
+### 8.4 Wi-Fi resilience (network-switch handling)
+
+A prior bug caused the widget's data to get "stuck" when the user left their own Wi-Fi range and later returned. The root causes were fixed across several layers:
+
+* **`InterruptedException` handling and self-restart:** WorkManager stops the Worker at the 10-minute runtime limit by interrupting the thread, which makes `Thread.sleep()` throw `InterruptedException`. Previously nothing caught it, so `doWork()` died by exception and never restarted. Now a `try/finally` catches it, and the `finally` block re-enqueues the loop with the `REPLACE` policy, **guaranteeing** a restart as long as the screen is active.
+* **15-minute heartbeat (`WidgetKeepAliveWorker`):** a periodic `PeriodicWorkRequest` that revives the main loop with the `KEEP` policy if it has died for any reason (process death, undelivered broadcast). It does nothing while the loop is alive. WorkManager persists it across device reboots.
+* **Network callback:** while the loop runs, a `ConnectivityManager.registerNetworkCallback()` watches Wi-Fi (`TRANSPORT_WIFI`) availability. On returning home, as soon as Wi-Fi is available again the waiting cycle breaks immediately and refreshes — no need to wait out the 5 seconds.
+* **Captive-portal login validation:** `doLogin()` no longer accepts any HTTP 200. It stores a session only if the response truly came from our server: a JSON `{"status":"success"}` body **and** a real `session=` cookie. Without this, a redirect page's HTTP 200 on a foreign network would "poison" the session with an empty token.
+* **Tap fallback:** tapping the widget makes `onUpdate()` restart the loop with `KEEP`, as a manual last resort.
+
+The `ScreenUnlockReceiver` (`USER_PRESENT` / `SCREEN_OFF` / `BOOT_COMPLETED`) is only an accelerator on devices where the event is delivered; because of Android 8+ implicit-broadcast restrictions (and the fact that `SCREEN_OFF` cannot be delivered to a manifest receiver), refresh reliability rests on the mechanisms above rather than on it.

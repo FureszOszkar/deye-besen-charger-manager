@@ -123,3 +123,40 @@ A műszerfalon található egy beépített "Konzol" és "Hibadobozok", amelyek v
 *   **Konzol kimenet:** Részletes hálózati és töltési eseményeket naplóz.
 
 **Biztonsági Jegyzet:** Ez a szoftver hálózati szinten (Modbus/BLE) lép kapcsolatba a hardverrel. Bár beépített biztonsági limitekkel rendelkezik (pl. Deye MAX áram korlátok), a konfigurációk (például a ház túlterhelés határának) beállításakor a helyi hálózat fizikai teherbírását figyelembe kell venni! Használd saját felelősségre.
+
+---
+
+## 8. Android Widget
+
+A projekt tartalmaz egy különálló Android-alkalmazást is (`AndroidWidget` mappa), amely egy **kezdőképernyős widgettel** jeleníti meg a rendszer élő adatait, anélkül hogy meg kellene nyitni a böngészős műszerfalat. Az alkalmazás APK-ját a GitHub Actions automatikusan lefordítja.
+
+### Mit mutat a widget?
+
+A widget a szerverrel megegyező, titkosított kapcsolaton keresztül másodpercenként frissülő értékeket jelenít meg:
+*   **Napelem** (PV termelés, W)
+*   **Hálózat** (hálózati be-/kitáplálás, W)
+*   **Akku SoC** (akkumulátor töltöttség, %)
+*   **Akku Telj.** (akkumulátor teljesítménye, W)
+*   **Ház** (házi fogyasztás / UPS terhelés, W)
+*   **Autó töltés** (a BESEN töltő aktuális teljesítménye, W)
+
+### Telepítés és beállítás
+
+1.  Töltsd le és telepítsd az APK-t a telefonra (a GitHub Actions build artifactjából).
+2.  Helyezd ki a **„Deye-Besen adatok"** widgetet a kezdőképernyőre.
+3.  A kihelyezéskor automatikusan megnyíló beállító képernyőn add meg:
+    *   **Szerver IP-cím** – a vezérlőt futtató gép helyi IP-címe (a widget a `8080`-as porton csatlakozik).
+    *   **Jelszó** – ugyanaz a dashboard-jelszó, amivel a webes felületre belépsz.
+    *   **Háttér átlátszóság** – a csúszkával a widget háttérképének átlátszósága állítható.
+4.  A **Mentés** gombbal a widget aktiválódik.
+
+### Működés
+
+*   A widget **csak akkor frissül, ha a telefon WiFi-n van** és a szerver elérhető. Idegen hálózaton vagy mobiladaton üresen (átlátszón) marad, majd hazatérve automatikusan újra megjelennek az adatok.
+*   A frissítés a képernyő bekapcsolt állapotában, kb. 5 másodpercenként történik (lezárt telefonon energiatakarékosságból szünetel).
+*   A widgetre **koppintva** azonnali kézi frissítés kényszeríthető.
+*   A widget ellenálló a **WiFi-hálózatok közötti váltásra**: ha elhagyod a saját hálózatod hatósugarát, majd visszatérsz, az adatok néhány másodpercen belül maguktól helyreállnak.
+
+### Biztonsági jegyzet
+
+A widget a dashboard-jelszót helyben, a telefon privát tárterületén (`SharedPreferences`) őrzi. Az alkalmazás `android:allowBackup="false"` beállítással tiltja az Android-mentést, hogy a jelszó ne legyen kinyerhető `adb backup`-pal. A widget és a szerver közötti kommunikáció végponttól végpontig titkosított (AES-256 + HMAC), a webes felülettel azonos módon.

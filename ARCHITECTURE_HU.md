@@ -161,3 +161,44 @@ Egy átvizsgálási kör a következő hibákat tárta fel és javította — it
 *   **Halott kód eltávolítása:** Két, fejlesztés közben ott felejtett "VÁZLAT" kódrészlet (a `run_charge_controller()` és a `ble_notification_received()` végén, a fő `while True` ciklus után, tehát sosem futottak le), valamint a `ControllerHTTPHandler` osztályon egy duplikált, elavult `is_authenticated()` / `get_cookie()` / `log_message()` metódus-definíció törölve lett. Ez utóbbi nem csak felesleges kód volt: mivel Python egy osztályban az utoljára definiált azonos nevű metódust tartja meg, ez a duplikátum csendben felülírta volna a session-lejáratot már ismerő `is_authenticated()`-et, ami a fenti session-lejárat javítást hatástalanná tette volna.
 *   **Android widget — PBKDF2 iterációszám:** A widget korábban hardkódolt `100000`-es iterációszámmal származtatta a session kulcsot, miközben a szerver `pbkdf2_iterations` értéke felhasználó által állítható (a README kifejezetten ajánlja csökkenteni gyengébb hardveren, pl. Raspberry Pi Zero-n). A widget mostantól bejelentkezés előtt lekéri ezt az értéket a `GET /api/login_info`-ról, `100000`-es fallback-kel, ha a lekérdezés bármiért sikertelen.
 *   **Android widget — `allowBackup`:** Az `AndroidManifest.xml` korábban `android:allowBackup="true"`-t állított, miközben a dashboard jelszó titkosítás nélkül, plaintext `SharedPreferences`-ben tárolódik — ez `adb backup`-pal kinyerhetővé tette a jelszót nem rootolt eszközön is. Mostantól `"false"`.
+
+---
+
+## 6. Android Widget (`AndroidWidget/`)
+
+A projekthez tartozik egy különálló natív Android-alkalmazás (Kotlin), amely egy kezdőképernyős widgettel jeleníti meg a rendszer élő telemetriáját. Saját APK-ként fordul, a GitHub Actions workflow (`.github/workflows/android_widget_build.yml`) minden `AndroidWidget/**` érintő pushra lefuttatja az `assembleDebug`-ot, és artifactként feltölti az APK-t.
+
+### 6.1 Komponensek
+
+*   **`DeyeWidgetProvider`** (`AppWidgetProvider`): a widget életciklusát kezeli. Az `onUpdate()` felrakja a nézetet, beállítja a koppintás-kezelőt, majd `KEEP` politikával elindítja a frissítő hurkot és a 15 perces életben tartó munkát. Az `onDisabled()` (az utolsó widget levételekor) mindkettőt leállítja.
+*   **`WidgetConfigActivity`**: a widget kihelyezésekor megnyíló beállító képernyő. A `DeyePrefs` nevű `SharedPreferences`-be menti a szerver IP-t, a dashboard jelszót (plaintext) és a háttér átlátszóságot (`bg_alpha`).
+*   **`WidgetUpdateWorker`** (`Worker`): a fő frissítő hurok (lásd 6.3).
+*   **`WidgetKeepAliveWorker`** (`Worker`): 15 percenként futó biztonsági háló, amely újraéleszti a fő hurkot, ha az meghalt volna (lásd 6.4).
+*   **`ScreenUnlockReceiver`** (`BroadcastReceiver`): best-effort képernyő- és boot-esemény figyelő; a frissítési lánc **nem** épül rá kizárólagosan (lásd 6.4).
+*   **`CryptoUtils`**: a szerverrel megegyező kulcsszármaztatás és E2EE visszafejtés (PBKDF2, AES-256-CBC, HMAC-SHA256).
+
+### 6.2 Adat- és hitelesítési folyamat
+
+A widget ugyanazt a titkosított protokollt használja, mint a webes felület:
+
+1.  **`GET /api/login_info`** – lekéri a szerver aktuális `pbkdf2_iterations` értékét (fallback: `100000`), hogy a kulcsszármaztatás egyezzen a szerverrel akkor is, ha az érték az alapértelmezettől eltér.
+2.  **`POST /api/login`** – a widget generál egy `clientNonce`-t, ebből és a jelszóból PBKDF2-vel session kulcsot származtat, és egy `authProof`-ot küld. Siker esetén a szerver `session=` sütit ad vissza.
+3.  **`GET /api/status`** – a session sütivel lekéri a telemetriát. A választ (ha `enc:true`) a session kulccsal AES-256-CBC + HMAC-SHA256 ellenőrzéssel visszafejti, és a `partiallyUpdateAppWidget()`-tel frissíti a widget nézetét.
+
+Session lejárat / `401` esetén a widget törli a memóriában tartott tokent és kulcsot, és a következő körben újra bejelentkezik.
+
+### 6.3 Frissítési modell
+
+A `widget_info.xml`-ben `updatePeriodMillis="0"` — a rendszer **nem** végez periodikus frissítést; a widget maga menedzseli a frissítést egy folyamatos hurokkal. A `WidgetUpdateWorker.doWork()` addig ismétel (kb. 5 másodperces ciklusidővel), amíg a képernyő be van kapcsolva (`PowerManager.isInteractive`) és a WiFi elérhető. Lezárt képernyőn a hurok magától leáll (energiatakarékosság), WiFi hiányában pedig üres/átlátszó állapotot mutat.
+
+### 6.4 WiFi-ellenállóság (hálózatváltás-kezelés)
+
+Egy korábbi hibában a widget adata „beragadt", ha a felhasználó elhagyta a saját WiFi hatósugarát, majd visszatért. A gyökérokok több rétegben javítva lettek:
+
+*   **`InterruptedException`-kezelés és önújraindítás:** A WorkManager a Worker 10 perces futásidő-limitjének lejártakor a szál megszakításával (interrupt) állítja le a hurkot, amitől a `Thread.sleep()` `InterruptedException`-t dob. Ezt korábban semmi nem kapta el, így a `doWork()` kivétellel halt meg, és sosem indult újra. Mostantól a `try/finally` szerkezet elkapja, és a `finally` ág `REPLACE` politikával **garantáltan újraütemezi** a hurkot, ameddig a képernyő aktív.
+*   **15 perces heartbeat (`WidgetKeepAliveWorker`):** Periodikus `PeriodicWorkRequest`, amely `KEEP` politikával újraéleszti a fő hurkot, ha az bármi miatt meghalt (process-halál, el nem kézbesített broadcast). Élő hurok mellett nem csinál semmit. A WorkManager ezt a telefon újraindítása után is megőrzi.
+*   **Hálózat-callback:** A hurok futása alatt egy `ConnectivityManager.registerNetworkCallback()` figyeli a WiFi (`TRANSPORT_WIFI`) elérhetőségét. Hazatéréskor, amint a WiFi újra elérhető, a várakozó ciklus azonnal megszakad és frissít — nem kell kivárni az 5 másodpercet.
+*   **Captive-portál elleni login-validáció:** A `doLogin()` már nem fogad el akármilyen HTTP 200-at. Csak akkor tárolja el a session-t, ha a válasz tényleg a mi szerverünktől jött: JSON `{"status":"success"}` body **és** valódi `session=` süti is érkezett. Enélkül idegen hálózaton egy átirányító oldal HTTP 200-a üres tokennel „mérgezte meg" a session-t.
+*   **Koppintás-mentőöv:** A widgetre koppintva az `onUpdate()` `KEEP`-pel újraindítja a hurkot, kézi végső lehetőségként.
+
+A `ScreenUnlockReceiver` (`USER_PRESENT` / `SCREEN_OFF` / `BOOT_COMPLETED`) csak gyorsítás azokon az eszközökön, ahol az esemény megérkezik; az Android 8+ implicit broadcast korlátozásai (és az, hogy a `SCREEN_OFF` manifest-receivernek nem kézbesíthető) miatt a frissítés megbízhatósága nem rá, hanem a fenti mechanizmusokra épül.
