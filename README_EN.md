@@ -174,6 +174,9 @@ py -m PyInstaller --onefile --clean --distpath "C:\Users\<Username>\dist_temp" -
 ```
 Once compilation completes, copy the generated `deye_besen_controller.exe` from `dist_temp` back to the project root directory.
 
+### E) Running on Linux (Debian 13)
+The [`LinuxController`](LinuxController) folder is fully self-contained — it holds everything needed to run on Linux, and can be copied to any directory under any name on the Linux machine. For installation and running it as a systemd service, see the [`LinuxController/README.md`](LinuxController/README.md) guide.
+
 ---
 
 ## 8. Configuration File (config.json) Guide

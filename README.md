@@ -2,7 +2,6 @@
 ## Rendszerdokumentáció és Felhasználói Kézikönyv
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
-<img width="1900" height="884" alt="kép" src="https://github.com/user-attachments/assets/48336519-fa86-4b7e-9840-3701d3d56fe0" />
 
 ---
 
@@ -44,6 +43,9 @@ A szoftver Python-ban íródott, és Python forráskódként, vagy PyInstaller-r
 ### Futtatás független EXE-ként
 1. Használd a mellékelt `deye_besen_controller.exe` fájlt. Nincs szükség telepítésre vagy Python környezetre.
 2. Csak kattints duplán az indításhoz. A program megnyit egy parancssori ablakot a naplókhoz, és elindítja a háttérszolgáltatásokat.
+
+### Linux (Debian 13)
+A [`LinuxController`](LinuxController) mappa önmagában, teljesen önállóan tartalmazza a Linux alatti futtatáshoz szükséges mindent — bármilyen néven, bármilyen könyvtárba átmásolható a Linux gépre. A telepítéshez és a systemd szolgáltatáskénti üzemeltetéshez lásd a [`LinuxController/README.md`](LinuxController/README.md) útmutatót.
 
 ### A Vezérlőpult (Dashboard) elérése
 Indítás után a webes felület elérhető a helyi hálózaton keresztül.
