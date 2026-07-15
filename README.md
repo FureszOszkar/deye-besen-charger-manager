@@ -93,7 +93,7 @@ Ezzel a móddal felülbírálhatsz minden automatizációt, és manuálisan adha
 
 ## 5. Konfiguráció és Megmaradó Állapot (Persistence)
 
-A beállítások automatikusan mentésre kerülnek egy helyi `config.json` fájlba. Ha újraindítod a szoftvert (vagy a számítógépet), az automatikusan visszatölti az utolsó beállításokat.
+A beállítások automatikusan mentésre kerülnek egy helyi `config.json` fájlba, amikor ténylegesen történik mentés (pl. a dashboardon módosítasz valamit, vagy egy töltési munkamenet lezárul). Ha újraindítod a szoftvert (vagy a számítógépet), az automatikusan visszatölti az utolsó beállításokat. **Fontos:** a `config.json` fájl önmagában, pusztán az indítástól **nem** jön létre automatikusan, és a webes felület nem tudja beállítani az inverter IP-t, a sorozatszámot vagy a töltő MAC-címét — ezeket a mellékelt `config_example.json` átmásolásával és kitöltésével (vagy egy meglévő működő `config.json` átvételével) kell megadni.
 
 A műszerfal (Dashboard) a következő beállításokat biztosítja:
 *   **Indítási SoC (%)** - Amikor eléri, indul a Solar Auto töltés.

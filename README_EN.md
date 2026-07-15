@@ -181,7 +181,7 @@ The [`LinuxController`](LinuxController) folder is fully self-contained — it h
 
 ## 8. Configuration File (config.json) Guide
 
-Upon startup, the program reads the `config.json` file. If it does not exist, it will be automatically created with built-in default values (`DEFAULT_CONFIG`).
+Upon startup, the program reads the `config.json` file if present. **It is not automatically created on first run** — without it, the program only uses built-in defaults (`DEFAULT_CONFIG`) in memory, and only writes the file once an actual save happens (e.g. a dashboard settings change, or a charging session ending). Note also that the Web Dashboard cannot set `inverter_ip`, `charger_mac`, or `logger_serial` — those hardware-identifying fields only come from `config.json`, so a working setup requires either copying the included [`config_example.json`](config_example.json) to `config.json` and filling in your own values, or copying an existing working `config.json` from another install.
 
 Most configurations are accessible and can be changed directly from the Web Dashboard. However, there are some hidden advanced settings:
 *   `"pbkdf2_iterations"` - The strength of the password hashing/encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins. This value is safe to change: the web dashboard and the widget in the `AndroidWidget` folder both fetch the current setting dynamically from the server at login time, so no client-side value needs to match it.

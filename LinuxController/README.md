@@ -47,7 +47,13 @@ A szkript:
 
 A program a `config.json`-t a **futtatáskori munkakönyvtárhoz relatívan** olvassa/írja, ezért mindig **ebből a mappából** kell indítani (`python main.py` a mappán belülről) — systemd service esetén ezt a `WorkingDirectory=` beállítás garantálja, amit az `install_linux.sh` automatikusan a helyes útvonalra állít be.
 
-A `config.json` nem része a mappának — első indításkor a program alapértelmezett beállításokkal létrehozza. Ha a meglévő (pl. Windows-oldali) beállításaidat át akarod hozni, másold ide a saját `config.json` fájlodat az első indítás előtt.
+A `config.json` **nem jön létre automatikusan indításkor** — ez korábban tévesen volt dokumentálva. A program hiányában csak memóriában használ beépített alapértékeket (`DEFAULT_CONFIG`), fájlt csak akkor ír, ha ténylegesen történik mentés (pl. a dashboard beállítás-mentésekor, vagy egy töltési munkamenet lezárásakor) — indításkor önmagában nem.
+
+**Ráadásul a webes felület nem tudja beállítani** az `inverter_ip`, `charger_mac`, `logger_serial` mezőket (csak SOC-határokat, ütemezést, teljesítmény-limiteket) — ezek **kizárólag** a `config.json`-ból tölthetők be. Enélkül a program a beépített placeholder-adatokkal (`192.168.0.100`, `00:11:22:33:44:55`) próbál kapcsolódni, ami nem fog sikerülni.
+
+**Ezért a `config.json` biztosítása nem opcionális, hanem szükséges** a valós hardverhez. Két lehetőség:
+1.  **Másold ide a mellékelt [`config_example.json`](config_example.json) fájlt** `config.json` néven, és írd bele a saját inverter IP-det, sorozatszámodat, a töltő nevét/MAC-címét és jelszavát.
+2.  **Vagy másold át a meglévő (pl. Windows-oldali) `config.json`-odat** ide, ha már van egy működő beállításod.
 
 ## Automatikus indítás systemd szolgáltatásként
 
