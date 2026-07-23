@@ -2156,53 +2156,90 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
         }
 
-        async function saveAutoAmpsSilent(val) {
+        // Közös POST-segéd az áramerősség-mentésekhez: ellenőrzi a HTTP-státuszt ÉS a szerver
+        // válaszát is, hiba esetén pedig LÁTHATÓ hibaüzenetet ad (korábban a hibák csak a
+        // böngészőkonzolba kerültek, így a felhasználó nem tudta meg, hogy a mentés meghiúsult).
+        // Visszatérés: true = sikeres mentés, false = sikertelen.
+        async function postAmpsConfig(payload, failContext) {
             try {
-                await fetch('/api/config', {
+                const response = await fetch('/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        start_soc: currentConfig.start_soc,
-                        stop_soc: currentConfig.stop_soc,
-                        stop_import_limit: currentConfig.stop_import_limit,
-                        grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
-                        house_power_limit_w: currentConfig.house_power_limit_w,
-                        persist_mode_on_restart: currentConfig.persist_mode_on_restart,
-                        charger_max_amps: val,
-                        force_submode: currentConfig.force_submode,
-                        schedule_solar_auto: currentConfig.schedule_solar_auto,
-                        forced_schedule: currentConfig.forced_schedule,
-                        reset_limit: true
-                    })
+                    body: JSON.stringify(payload)
                 });
-                originalAutoAmps = val;
+                const result = await response.json().catch(() => null);
+                if (!response.ok || !result || result.status !== 'success') {
+                    const detail = (result && result.message) ? result.message : ('HTTP ' + response.status);
+                    alert('HIBA: ' + failContext + ' nem sikerült! (' + detail + ')');
+                    return false;
+                }
+                return true;
             } catch (err) {
                 console.error(err);
+                alert('HIBA: ' + failContext + ' nem sikerült! (hálózati hiba, a szerver nem érhető el)');
+                return false;
+            }
+        }
+
+        // Csúszka-mentések késleltetése (debounce) és sorosítása:
+        // - a debounce miatt húzás közben NEM indul minden lépésnél külön kérés, csak megálláskor;
+        // - a mentések láncolása (promise chain) garantálja, hogy egyszerre csak egy kérés fut,
+        //   és a küldés pillanatában mindig a csúszka AKTUÁLIS értéke megy ki. Korábban a húzás
+        //   minden lépése párhuzamos kérést indított, amelyek sorrendje nem volt garantált --
+        //   így előfordulhatott, hogy egy köztes érték (pl. 15A) érkezett meg utolsóként a
+        //   szerverre, és az maradt elmentve a ténylegesen beállított érték helyett.
+        let ampsSaveTimers = { auto: null, force: null };
+        let ampsSaveChain = Promise.resolve();
+
+        function scheduleAmpsSave(mode) {
+            clearTimeout(ampsSaveTimers[mode]);
+            ampsSaveTimers[mode] = setTimeout(() => {
+                ampsSaveChain = ampsSaveChain.then(() => {
+                    const unmanaged = document.getElementById(mode + '_unmanaged_current').checked;
+                    const slider = document.getElementById(mode + '_charger_max_amps');
+                    const val = unmanaged ? 0 : parseInt(slider.value);
+                    return (mode === 'auto') ? saveAutoAmpsSilent(val) : saveForceAmpsSilent(val);
+                });
+            }, 400);
+        }
+
+        async function saveAutoAmpsSilent(val) {
+            const ok = await postAmpsConfig({
+                start_soc: currentConfig.start_soc,
+                stop_soc: currentConfig.stop_soc,
+                stop_import_limit: currentConfig.stop_import_limit,
+                grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
+                house_power_limit_w: currentConfig.house_power_limit_w,
+                persist_mode_on_restart: currentConfig.persist_mode_on_restart,
+                charger_max_amps: val,
+                force_submode: currentConfig.force_submode,
+                schedule_solar_auto: currentConfig.schedule_solar_auto,
+                forced_schedule: currentConfig.forced_schedule,
+                reset_limit: true
+            }, 'az áramerősség mentése');
+            if (ok) {
+                originalAutoAmps = val;
+                currentConfig.charger_max_amps = val;
             }
         }
 
         async function saveForceAmpsSilent(val) {
-            try {
-                await fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        start_soc: currentConfig.start_soc,
-                        stop_soc: currentConfig.stop_soc,
-                        stop_import_limit: currentConfig.stop_import_limit,
-                        grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
-                        house_power_limit_w: currentConfig.house_power_limit_w,
-                        persist_mode_on_restart: currentConfig.persist_mode_on_restart,
-                        charger_max_amps: val,
-                        force_submode: currentConfig.force_submode,
-                        schedule_solar_auto: currentConfig.schedule_solar_auto,
-                        forced_schedule: currentConfig.forced_schedule,
-                        reset_limit: true
-                    })
-                });
+            const ok = await postAmpsConfig({
+                start_soc: currentConfig.start_soc,
+                stop_soc: currentConfig.stop_soc,
+                stop_import_limit: currentConfig.stop_import_limit,
+                grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
+                house_power_limit_w: currentConfig.house_power_limit_w,
+                persist_mode_on_restart: currentConfig.persist_mode_on_restart,
+                charger_max_amps: val,
+                force_submode: currentConfig.force_submode,
+                schedule_solar_auto: currentConfig.schedule_solar_auto,
+                forced_schedule: currentConfig.forced_schedule,
+                reset_limit: true
+            }, 'az áramerősség mentése');
+            if (ok) {
                 originalForceAmps = val;
-            } catch (err) {
-                console.error(err);
+                currentConfig.charger_max_amps = val;
             }
         }
 
@@ -2231,7 +2268,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             } else {
                 container.style.display = 'none';
-                saveAutoAmpsSilent(currentVal);
+                scheduleAmpsSave('auto');
             }
         }
 
@@ -2260,39 +2297,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             } else {
                 if (container) container.style.display = 'none';
-                saveForceAmpsSilent(currentVal);
+                scheduleAmpsSave('force');
             }
         }
 
         async function applyForceAmpsWithRestart() {
             const slider = document.getElementById('force_charger_max_amps');
             const val = parseInt(slider.value);
-            
-            try {
-                await fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        start_soc: currentConfig.start_soc,
-                        stop_soc: currentConfig.stop_soc,
-                        stop_import_limit: currentConfig.stop_import_limit,
-                        grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
-                        house_power_limit_w: currentConfig.house_power_limit_w,
-                        persist_mode_on_restart: currentConfig.persist_mode_on_restart,
-                        charger_max_amps: val,
-                        force_submode: currentConfig.force_submode,
-                        schedule_solar_auto: currentConfig.schedule_solar_auto,
-                        forced_schedule: currentConfig.forced_schedule,
-                        apply_with_restart: true,
-                        reset_limit: false
-                    })
-                });
+
+            const ok = await postAmpsConfig({
+                start_soc: currentConfig.start_soc,
+                stop_soc: currentConfig.stop_soc,
+                stop_import_limit: currentConfig.stop_import_limit,
+                grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
+                house_power_limit_w: currentConfig.house_power_limit_w,
+                persist_mode_on_restart: currentConfig.persist_mode_on_restart,
+                charger_max_amps: val,
+                force_submode: currentConfig.force_submode,
+                schedule_solar_auto: currentConfig.schedule_solar_auto,
+                forced_schedule: currentConfig.forced_schedule,
+                apply_with_restart: true,
+                reset_limit: false
+            }, 'a töltés közbeni áram-módosítás alkalmazása');
+            if (ok) {
                 originalForceAmps = val;
+                currentConfig.charger_max_amps = val;
                 const container = document.getElementById('force-apply-container');
                 if (container) container.style.display = 'none';
                 updateStatus();
-            } catch (err) {
-                console.error(err);
             }
         }
 
@@ -2322,11 +2354,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
                 }
             } else {
-                if (mode === 'auto') {
-                    await saveAutoAmpsSilent(val);
-                } else {
-                    await saveForceAmpsSilent(val);
-                }
+                // A mentés a közös, sorosított ütemezőn keresztül megy, hogy ne versenyezhessen
+                // egy éppen függőben lévő csúszka-mentéssel
+                scheduleAmpsSave(mode);
                 const applyContainer = document.getElementById(mode + '-apply-container');
                 if (applyContainer) applyContainer.style.display = 'none';
             }
@@ -2334,30 +2364,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         async function applyAutoAmps(withStop) {
             const charger_max_amps = parseInt(document.getElementById('auto_charger_max_amps').value);
-            try {
-                await fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        start_soc: currentConfig.start_soc,
-                        stop_soc: currentConfig.stop_soc,
-                        stop_import_limit: currentConfig.stop_import_limit,
-                        grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
-                        house_power_limit_w: currentConfig.house_power_limit_w,
-                        persist_mode_on_restart: currentConfig.persist_mode_on_restart,
-                        charger_max_amps,
-                        force_submode: currentConfig.force_submode,
-                        schedule_solar_auto: currentConfig.schedule_solar_auto,
-                        forced_schedule: currentConfig.forced_schedule,
-                        apply_with_stop: withStop,
-                        reset_limit: !withStop
-                    })
-                });
+            const ok = await postAmpsConfig({
+                start_soc: currentConfig.start_soc,
+                stop_soc: currentConfig.stop_soc,
+                stop_import_limit: currentConfig.stop_import_limit,
+                grid_charge_duration_minutes: currentConfig.grid_charge_duration_minutes,
+                house_power_limit_w: currentConfig.house_power_limit_w,
+                persist_mode_on_restart: currentConfig.persist_mode_on_restart,
+                charger_max_amps,
+                force_submode: currentConfig.force_submode,
+                schedule_solar_auto: currentConfig.schedule_solar_auto,
+                forced_schedule: currentConfig.forced_schedule,
+                apply_with_stop: withStop,
+                reset_limit: !withStop
+            }, 'a töltés közbeni áram-módosítás alkalmazása');
+            if (ok) {
                 originalAutoAmps = charger_max_amps;
+                currentConfig.charger_max_amps = charger_max_amps;
                 document.getElementById('auto-apply-container').style.display = 'none';
                 updateStatus();
-            } catch (err) {
-                console.error(err);
             }
         }
 
@@ -3542,7 +3567,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     if "persist_mode_on_restart" in config_data:
                         shared_state["persist_mode_on_restart"] = bool(config_data["persist_mode_on_restart"])
                     if "charger_max_amps" in config_data:
-                        shared_state["charger_max_amps"] = int(config_data["charger_max_amps"])
+                        # Validáció: 0 = "nem felügyelt" (érvényes), egyébként csak 6-16A fogadható el.
+                        # A /api/set_current végpont eddig is validált, de ez a végpont (amit a
+                        # csúszkák ténylegesen használnak) korábban ellenőrzés nélkül elfogadott
+                        # bármilyen egész értéket.
+                        amps_val = int(config_data["charger_max_amps"])
+                        if amps_val != 0 and not (6 <= amps_val <= 16):
+                            self._send_encrypted_json({"status": "error", "message": f"Érvénytelen áramerősség: {amps_val}A (megengedett: 0 vagy 6-16A)"})
+                            return
+                        shared_state["charger_max_amps"] = amps_val
                     if "force_submode" in config_data:
                         shared_state["force_submode"] = config_data["force_submode"]
                     if "forced_schedule" in config_data:

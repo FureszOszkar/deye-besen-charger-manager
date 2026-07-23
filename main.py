@@ -74,15 +74,20 @@ async def main():
     import traceback
     
     log_message("[WATCHDOG] Központi Ping-Pong Watchdog elindítva.")
+    # A függőben lévő megszakítások nyilvántartása: {task_name: a cancel() kiadásának időpontja}.
+    # Erre azért van szükség, mert a cancel() nem állítja le azonnal a feladatot -- ha a pong
+    # időbélyeget azonnal frissre állítanánk (ahogy korábban történt), egy elakadt megszakítás
+    # 30 másodpercenként újra "friss"-nek tűnne, miközben a régi feladat zombiként tovább futhat.
+    cancel_pending = {}
     while True:
         await asyncio.sleep(5)
         current_time = time.time()
-        
+
         with state_lock:
             pongs = shared_state.get("task_pong", {})
-            
+
         for task_name, task in tasks.items():
-            # 1. Összeomlás ellenőrzése (Crash)
+            # 1. Összeomlás / leállás ellenőrzése (Crash vagy sikeres cancel)
             if task.done():
                 try:
                     task.result()
@@ -92,11 +97,13 @@ async def main():
                 except Exception as e:
                     err_msg = traceback.format_exc()
                     log_message(f"[WATCHDOG CRITICAL] Váratlan összeomlás a(z) {task_name} feladatban!\n{err_msg}")
-                
-                # Újraindítás
+
+                # Újraindítás -- a pong időt CSAK itt reseteljük, amikor a régi feladat
+                # bizonyítottan leállt és tényleg új példány indul.
                 log_message(f"[WATCHDOG] {task_name} újraindítása...")
+                cancel_pending.pop(task_name, None)
                 with state_lock:
-                    shared_state["task_pong"][task_name] = current_time # Reseteljük az időt, hogy ne legyen azonnal timeout
+                    shared_state["task_pong"][task_name] = current_time
                 if task_name == "inverter":
                     tasks["inverter"] = asyncio.create_task(run_inverter_polling())
                 elif task_name == "ble":
@@ -104,14 +111,20 @@ async def main():
                 elif task_name == "controller":
                     tasks["controller"] = asyncio.create_task(run_charge_controller())
                 continue
-                
+
             # 2. Befagyás ellenőrzése (Freeze - 30 másodperces limit)
             last_pong = pongs.get(task_name, current_time)
             if current_time - last_pong > 30:
-                log_message(f"[WATCHDOG CRITICAL] Befagyás (Timeout): A(z) {task_name} feladat 30 másodperce nem küldött PONG jelet! Erőszakos újraindítás...")
-                task.cancel() # Ez beállítja a task.done() állapotot, így a következő (5s múlva lévő) ciklusban újraindul
-                with state_lock:
-                    shared_state["task_pong"][task_name] = current_time
+                if task_name not in cancel_pending:
+                    log_message(f"[WATCHDOG CRITICAL] Befagyás (Timeout): A(z) {task_name} feladat 30 másodperce nem küldött PONG jelet! Erőszakos újraindítás...")
+                    task.cancel()  # A task.done() állapotot állítja be; az újraindítás a fenti ágban történik, miután tényleg leállt
+                    cancel_pending[task_name] = current_time
+                elif current_time - cancel_pending[task_name] > 30:
+                    # A megszakítás 30 másodperce függőben van és a feladat még mindig nem állt le --
+                    # ez kóros állapot, naplózzuk és újra próbáljuk a cancel-t.
+                    log_message(f"[WATCHDOG CRITICAL] A(z) {task_name} feladat a cancel() után 30 másodperccel sem állt le! Ismételt megszakítási kísérlet...")
+                    task.cancel()
+                    cancel_pending[task_name] = current_time
 
 
 def run_program():
