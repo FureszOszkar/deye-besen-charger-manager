@@ -1980,6 +1980,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <script>
         // === PSK TITKOSÍTÁSI MODUL (Kliens oldal, CryptoJS alapú AES-CBC + HMAC) ===
         let _sessionKeyHex = null;
+        // Egymást követő sikertelen visszafejtések számlálója. Ha a sessionStorage-ban
+        // tárolt kulcs elavult (pl. a telefon háttérből ébresztette fel a lapot egy
+        // közben újraindult/lejárt szerver-session mellett), a MAC-ellenőrzés mindig
+        // el fog hasalni. Néhány próbálkozás után ezt tényleges munkamenet-problémának
+        // tekintjük és kényszerítünk egy friss bejelentkezést.
+        let _pskDecryptFailCount = 0;
 
         // SessionKey betöltése a sessionStorage-ból (a login oldal mentette oda)
         (function initPSK() {
@@ -2060,19 +2066,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             // Válasz visszafejtése, ha titkosított
             if (_sessionKeyHex && response.ok) {
+                let json;
                 try {
                     const cloned = response.clone();
-                    const json = await cloned.json();
-                    if (json && json.enc && json.iv && json.data && json.mac) {
+                    json = await cloned.json();
+                } catch (e) {
+                    // Nem JSON válasz -- eredeti response visszaadása változatlanul
+                    return response;
+                }
+
+                if (json && json.enc) {
+                    // A szerver kifejezetten titkosított csomagként jelölte -- ha innentől
+                    // bármi hibázik (hiányos mezők vagy MAC-hiba), azt a munkamenet-kulcs
+                    // elavulásának tekintjük, NEM adjuk tovább a még titkosított/hibás
+                    // csomagot a hívónak (pl. updateStatus()), mert azt téves módon valós
+                    // konfigurációként dolgozná fel (lásd a korábbi 16A-incidenst).
+                    try {
+                        if (!json.iv || !json.data || !json.mac) {
+                            throw new Error("Hiányos titkosított válasz (iv/data/mac hiányzik)");
+                        }
                         const decrypted = _pskDecrypt(_sessionKeyHex, json.iv, json.data, json.mac);
+                        _pskDecryptFailCount = 0;
                         return new Response(JSON.stringify(decrypted), {
                             status: response.status,
                             statusText: response.statusText,
                             headers: response.headers
                         });
+                    } catch (e) {
+                        _pskDecryptFailCount++;
+                        console.error(`PSK visszafejtés sikertelen (${_pskDecryptFailCount}/3):`, e);
+                        if (_pskDecryptFailCount >= 3) {
+                            console.error("Munkamenet-kulcs elavultnak tekintve. Új bejelentkezés kényszerítése...");
+                            sessionStorage.removeItem('_psk_key_hex');
+                            sessionStorage.removeItem('_psk_nonce');
+                            window.location.reload();
+                        }
+                        throw e;
                     }
-                } catch (e) {
-                    // Nem JSON vagy nem titkosított válasz: eredeti response visszaadása
                 }
             }
 
@@ -2885,8 +2915,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
                 }
 
-                // Konfiguráció kitöltése a szerver adataival (csak az első alkalommal)
-                if (!configLoaded) {
+                // Konfiguráció kitöltése a szerver adataival (csak az első alkalommal).
+                // Védőháló: ha a data nyilvánvalóan nem valós/teljes konfiguráció (pl. egy
+                // visszafejtés nélkül átcsúszott, még titkosított csomag számai lennének itt),
+                // NEM állítjuk configLoaded-et igazra -- a következő sikeres lekérdezés így
+                // még mindig megpróbálhatja helyesen feltölteni a felületet, ahelyett hogy
+                // egy hibás/üres állapot örökre beragadna.
+                if (!configLoaded && typeof data.charger_max_amps === 'number' && typeof data.control_mode === 'string') {
                     document.getElementById('auto_start_soc').value = data.start_soc;
                     document.getElementById('auto_stop_soc').value = data.stop_soc || 0;
                     updateInputStatus('auto_stop_soc');
