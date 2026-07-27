@@ -280,6 +280,12 @@ A review pass found and fixed the following issues. Summarized here since they a
 * **Android widget — PBKDF2 iteration count:** The widget derived its session key using a hardcoded `100000` iteration count, while the server's `pbkdf2_iterations` is user-configurable (the main README recommends lowering it on weak hardware like a Raspberry Pi Zero). The widget now calls `GET /api/login_info` before deriving the key, with `100000` retained only as a fallback if that call fails.
 * **Android widget — `allowBackup`:** `AndroidManifest.xml` set `android:allowBackup="true"` while storing the dashboard password in plaintext `SharedPreferences`, making the password extractable via `adb backup` on a non-rooted device. Set to `"false"`.
 
+### 2026-07-23: dashboard stuck in stale state due to an expired session key (safety-relevant)
+
+* **Symptom:** on mobile browsers (typically after the tab resumed from a backgrounded state), the dashboard showed built-in default values instead of real data (e.g. the charging-current slider at 16A, solar mode disabled). On one occasion this actually caused the charger to start charging at a higher current (15A) than configured (6A).
+* **Root cause:** the client-side decryption of encrypted API responses (the `window.fetch()` override) silently failed whenever the session key cached in `sessionStorage` had gone stale (e.g. the phone woke the tab from the background while the server-side session had since restarted/expired), and passed the **still-encrypted** payload through as if it were real data. `updateStatus()` processed this garbage, and the one-time config-population logic — guarded by a `configLoaded` flag meant to run only once, ever — locked itself onto this bad state **unconditionally**, permanently, until a full page reload.
+* **Fix:** the `fetch()` override now distinguishes "not an encrypted response at all" from "explicitly marked encrypted but undecryptable" — the latter is never passed through as real data; the caller simply skips that polling cycle. After three consecutive decryption failures, the client treats the key as stale, clears it, and forces a fresh login (establishing a new valid encrypted session). The `configLoaded` guard was also hardened: it only locks in once the received data actually looks like real configuration (`charger_max_amps` is a number, `control_mode` is a string).
+
 ---
 
 ## 8. Android Widget (`AndroidWidget/`)
