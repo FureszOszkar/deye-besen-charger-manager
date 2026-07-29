@@ -252,7 +252,11 @@ To protect the charger from rapid state switching (flapping) and infinite start/
 5. **Authenticated Unlock Only:** `/api/unlock`, which clears an active Lockdown, is only reachable after successful login — it sits behind the same `is_authenticated()` check as every other state-mutating endpoint, so an unauthenticated client on the local network cannot release the safety lock.
 
 ### 6.2 Configuration Validation
-When saving configurations via the dashboard or loading them from disk, the system applies logical validations. If a user attempts to set the start threshold (`start_soc`) lower than the stop threshold (`stop_soc`), the client-side JavaScript and the server-side API both reject the modification with an error. Upon loading from the configuration file, the system automatically elevates the start value to match the stop value to prevent rapid, infinite switching loops.
+When saving configurations via the dashboard or loading them from disk, the system applies logical validations.
+
+**Atomic server-side null validation (empty-field protection):** The `/api/config` handler reads all numeric field values from `config_data` FIRST, before applying any of them. If any value is `null` (JSON null — sent when the client has an empty input field, since `JSON.stringify(NaN) === null`) OR `charger_max_amps` is outside the 6-16A range, the handler: (1) calls `load_config()` to restore `shared_state` from the last known-good `config.json` (no partial mutation occurs), and (2) returns `{"status": "error", "message": "Hibás adattartalom miatt visszaállt a konfig az eredetire"}` as clean JSON. Only when every field is valid are they applied atomically inside a single `with state_lock:` block. This server-side guard protects against empty fields regardless of what the client code does — if client code ever introduces a `|| fallback` coercion, the value silently becomes a plausible number, but if it doesn't and the empty field reaches the server as `null`, the server will always catch it.
+
+**`start_soc < stop_soc` check** runs before any mutation (not after, as in the original sequential handler). Upon loading from the configuration file, `load_config()` also performs this check and automatically elevates `start_soc` to match `stop_soc` to prevent infinite switching loops.
 
 **`forced_schedule` schema validation:** The weekly schedule array received by `POST /api/config` is validated server-side (`validate_forced_schedule()` in `dashboard.py`) before being written to `shared_state` or `config.json`:
 * Must be a list of exactly 7 entries, one per weekday, no duplicates.
@@ -267,7 +271,15 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 
 ---
 
-## 7. Recent Fixes and Hardening (2026-07-08)
+## 7. Recent Fixes and Hardening (2026-07-29)
+
+* **`config.py` — hardcoded numeric defaults removed:** The six control-critical fields (`start_soc`, `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`, `house_power_limit_w`, `charger_max_amps`) in both `DEFAULT_CONFIG` and the `shared_state` initializer now default to `None` instead of plausible-looking numbers. `load_config()` is now `None`-tolerant: it only calls `int()` on a field if the loaded value is not `None`. If `config.json` is missing, these fields remain `None`; any comparison in `charging_logic.py` will then raise `TypeError`, which the `main.py` watchdog catches and handles by restarting the task — charging never starts with fabricated values.
+* **`charging_logic.py` — `0 → 16A` conversion removed:** Three occurrences of `start_amps = 16 if charger_max_amps == 0 else charger_max_amps` (and one for `target_amps`) deleted. The old dual meaning of `charger_max_amps == 0` ("unmanaged" vs. missing/corrupt data) is eliminated; `charger_max_amps` is now always a concrete 6-16A value enforced by the server-side validation.
+* **`dashboard.py` — "software current-limit disable" feature removed:** The "Töltőáram szoftveres szabályzásának kikapcsolása" checkboxes (`auto_unmanaged_current`, `force-unmanaged-container`) and the `toggleUnmanagedCurrent(mode)` JS function, along with all `unmanaged` branches in `scheduleAmpsSave`, `checkAutoAmpsChanged`, `checkForceAmpsChanged`, and `updateStatus()`, have been deleted. The charger-amps slider always shows a concrete 6-16A value.
+* **`dashboard.py` — `saveAutoConfig` empty-field coercions removed:** The `|| 100` and `|| 0` fallback coercions on five numeric fields have been removed. An empty input now sends `null` to the server (via `parseInt("") === NaN` → `JSON.stringify(NaN) === null`), which the server's atomic validator rejects. On error, the client shows the server's message and calls `updateStatus()` to repopulate the form with the last saved values.
+* **`dashboard.py` — `/api/config` atomic validation:** See the updated Section 6.2. The original sequential field-by-field mutation replaced with a validate-first, apply-atomically model with `load_config()`-based rollback on any invalid input.
+
+## 8. Recent Fixes and Hardening (2026-07-08)
 
 A review pass found and fixed the following issues. Summarized here since they affect behavior described elsewhere in this document:
 
@@ -279,12 +291,6 @@ A review pass found and fixed the following issues. Summarized here since they a
 * **Dead code removal:** Two leftover draft/"VÁZLAT" code blocks (unreachable code after the main `while True` loops in `run_charge_controller()` and `ble_notification_received()`) and a duplicate, stale `is_authenticated()` / `get_cookie()` / `log_message()` method definition on `ControllerHTTPHandler` were removed. The duplicate handler methods were not merely dead weight — because Python resolves a class's last matching method definition, the duplicate `is_authenticated()` silently overrode the session-expiry-aware version, which would have made the session TTL fix above a no-op.
 * **Android widget — PBKDF2 iteration count:** The widget derived its session key using a hardcoded `100000` iteration count, while the server's `pbkdf2_iterations` is user-configurable (the main README recommends lowering it on weak hardware like a Raspberry Pi Zero). The widget now calls `GET /api/login_info` before deriving the key, with `100000` retained only as a fallback if that call fails.
 * **Android widget — `allowBackup`:** `AndroidManifest.xml` set `android:allowBackup="true"` while storing the dashboard password in plaintext `SharedPreferences`, making the password extractable via `adb backup` on a non-rooted device. Set to `"false"`.
-
-### 2026-07-23: dashboard stuck in stale state due to an expired session key (safety-relevant)
-
-* **Symptom:** on mobile browsers (typically after the tab resumed from a backgrounded state), the dashboard showed built-in default values instead of real data (e.g. the charging-current slider at 16A, solar mode disabled). On one occasion this actually caused the charger to start charging at a higher current (15A) than configured (6A).
-* **Root cause:** the client-side decryption of encrypted API responses (the `window.fetch()` override) silently failed whenever the session key cached in `sessionStorage` had gone stale (e.g. the phone woke the tab from the background while the server-side session had since restarted/expired), and passed the **still-encrypted** payload through as if it were real data. `updateStatus()` processed this garbage, and the one-time config-population logic — guarded by a `configLoaded` flag meant to run only once, ever — locked itself onto this bad state **unconditionally**, permanently, until a full page reload.
-* **Fix:** the `fetch()` override now distinguishes "not an encrypted response at all" from "explicitly marked encrypted but undecryptable" — the latter is never passed through as real data; the caller simply skips that polling cycle. After three consecutive decryption failures, the client treats the key as stale, clears it, and forces a fresh login (establishing a new valid encrypted session). The `configLoaded` guard was also hardened: it only locks in once the received data actually looks like real configuration (`charger_max_amps` is a number, `control_mode` is a string).
 
 ---
 

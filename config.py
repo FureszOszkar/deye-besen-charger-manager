@@ -10,17 +10,17 @@ DEFAULT_CONFIG = {
     "inverter_port": 8899,
     "logger_serial": 1234567890,
     "http_port": 8080,
-    "start_soc": 100,
-    "stop_soc": 0,
-    "stop_import_limit": 2000,
-    "grid_charge_duration_minutes": 30,
-    "house_power_limit_w": 3000,
+    "start_soc": None,
+    "stop_soc": None,
+    "stop_import_limit": None,
+    "grid_charge_duration_minutes": None,
+    "house_power_limit_w": None,
     "control_mode": "monitoring",          # auto / schedule / force / monitoring
     "persist_mode_on_restart": False,
     "charger_name": "ACP#DefaultName",
     "charger_mac": "00:11:22:33:44:55",
     "charger_password": "FFFFFFFFFFFF",
-    "charger_max_amps": 16,
+    "charger_max_amps": None,
     "force_submode": "manual_stop",        # manual_start / manual_stop
     "schedule_solar_auto": False,
     "auto_enabled": False,
@@ -93,14 +93,14 @@ shared_state = {
     "last_charge": {},            # Legutóbbi lezárt töltési rekord adatai
     
     # Vezérlési paraméterek (config.json-ból töltve)
-    "start_soc": 100,
-    "stop_soc": 0,
-    "stop_import_limit": 2000,
-    "grid_charge_duration_minutes": 30,
-    "house_power_limit_w": 3000,
+    "start_soc": None,
+    "stop_soc": None,
+    "stop_import_limit": None,
+    "grid_charge_duration_minutes": None,
+    "house_power_limit_w": None,
     "control_mode": "monitoring",
     "persist_mode_on_restart": False,
-    "charger_max_amps": 16,
+    "charger_max_amps": None,
     "active_current_limit": 0,
     "force_submode": "manual_stop",
     "schedule_solar_auto": False,
@@ -166,18 +166,25 @@ def load_config():
             
     # Állapot frissítése
     with state_lock:
-        shared_state["start_soc"] = int(config["start_soc"])
-        shared_state["stop_soc"] = int(config.get("stop_soc", 0))
-        
-        # Validation: start_soc >= stop_soc
-        if shared_state["start_soc"] < shared_state["stop_soc"]:
-            shared_state["start_soc"] = shared_state["stop_soc"]
+        if config.get("start_soc") is not None:
+            shared_state["start_soc"] = int(config["start_soc"])
+        if config.get("stop_soc") is not None:
+            shared_state["stop_soc"] = int(config["stop_soc"])
 
-        shared_state["stop_import_limit"] = int(config["stop_import_limit"])
-        shared_state["grid_charge_duration_minutes"] = int(config["grid_charge_duration_minutes"])
-        shared_state["house_power_limit_w"] = int(config["house_power_limit_w"])
+        # Validation: start_soc >= stop_soc (csak ha mindkettő betöltött)
+        if shared_state["start_soc"] is not None and shared_state["stop_soc"] is not None:
+            if shared_state["start_soc"] < shared_state["stop_soc"]:
+                shared_state["start_soc"] = shared_state["stop_soc"]
+
+        if config.get("stop_import_limit") is not None:
+            shared_state["stop_import_limit"] = int(config["stop_import_limit"])
+        if config.get("grid_charge_duration_minutes") is not None:
+            shared_state["grid_charge_duration_minutes"] = int(config["grid_charge_duration_minutes"])
+        if config.get("house_power_limit_w") is not None:
+            shared_state["house_power_limit_w"] = int(config["house_power_limit_w"])
         shared_state["persist_mode_on_restart"] = bool(config["persist_mode_on_restart"])
-        shared_state["charger_max_amps"] = int(config.get("charger_max_amps", 16))
+        if config.get("charger_max_amps") is not None:
+            shared_state["charger_max_amps"] = int(config["charger_max_amps"])
         shared_state["force_submode"] = config.get("force_submode", "manual_stop")
         shared_state["schedule_solar_auto"] = bool(config.get("schedule_solar_auto", False))
         shared_state["web_auth_enabled"] = bool(config.get("web_auth_enabled", True))

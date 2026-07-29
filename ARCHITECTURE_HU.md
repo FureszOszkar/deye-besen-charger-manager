@@ -108,23 +108,92 @@ A START és STOP parancsok kódjai:
 
 ---
 
-## 4. Szoftver Funkciók és Biztonság
+## 4. API Végpontok és Műszerfal Interakció
 
-### 4.1 Áramkorlát (Current Limit) Váltás
+A beépített HTTP szerver kiszolgálja a statikus webes műszerfalat, és JSON API-kat biztosít az élő szinkronizációhoz (a kliens 2 másodpercenként frissíti).
+
+### Helyi Hálózati Hozzáférés Védelme (Hitelesítés)
+
+Ha a konfigurációban a `"web_auth_enabled"` aktív, a szerver minden bejövő kérés `Cookie` fejlécében validálja a `session` tokent.
+
+*   **Hitelesítés nélkül:** Ha a kérés nem tartalmaz érvényes session tokent, a `/` végpont a glassmorfikus bejelentkezési felületet (`LOGIN_HTML`) adja vissza, míg az API végpontok (pl. `/api/status`, `/api/config`) `401 Unauthorized` HTTP hibát küldenek `{"status": "unauthorized", "message": "Autentikáció szükséges!"}` JSON tartalommal.
+*   Minden állapotmódosító POST végpont (köztük az `/api/unlock`) érvényes session-t igényel; kizárólag az `/api/login` és a csak olvasható `/api/login_info` érhető el bejelentkezés nélkül.
+
+**Adatvédelem / Névváltás:**
+Biztonsági és adatvédelmi okokból az összes korábbi "Attila" felhasználónév "BDmanager"-re cserélve a hitelesítési folyamatban és a parancsokban (pl. `start_payload[1:17] = b"BDmanager".ljust(16, b"\x00")`). Ez megfelel a slespersen/evseMQTT projekt alapértelmezett beállításának.
+
+*   **Kivétel:** A `/background.png` bejelentkezés nélkül lekérhető, hogy a bejelentkezési képernyő háttere be tudjon tölteni.
+
+### Végpontok közötti API Titkosítás (E2EE)
+
+A webes Műszerfal kliens oldali JavaScript kódja és a Python HTTP szerver közötti forgalom hálózati lehallgatás (sniffing) elleni védelme beépített, katonai szintű kriptográfiát használ:
+1.  **Jelszó Ellenőrzés:** A jelszó (plaintext) soha nem kerül elküldésre a hálózaton. A böngésző egy HMAC-SHA256 alapú `auth_proof`-ot küld (amely a szerver által generált `client_nonce` alapján készül, a 100 000 iterációs PBKDF2-SHA256 kulccsal).
+2.  **Transzparens Payload Titkosítás:** A sikeres bejelentkezés után a kliens oldalon felülírt `fetch()` API automatikusan titkosít minden HTTP POST body-t. Korábban a böngésző natív WebCrypto API-ját használtuk (AES-GCM), de a mobil böngészők (pl. Chrome, Vivaldi) HTTP-n történő tiltása miatt a kliens oldal teljesen függetlenített CryptoJS alapokra állt át. A payload így AES-256-CBC módban (PKCS7 paddinggal) titkosítódik, amelyhez utólagos HMAC-SHA256 (Encrypt-then-MAC) ellenőrzőösszeg csatlakozik a manipulációk elkerülésére. A szerver a `pycryptodome` csomaggal fejti vissza a kéréseket, a válaszok JSON objektumai pedig ugyanígy titkosítva és dedikált MAC aláírással érkeznek vissza a klienshez.
+3.  **Session lejárat:** Minden `active_sessions`-ben tárolt bejelentkezési token mostantól szerveroldali lejárati időbélyeget is kap (`SESSION_TTL_SECONDS`, alapértelmezetten 24 óra). A lejárt tokent a rendszer a következő hozzáférésnél automatikusan érvénytelennek tekinti és törli, így egy ellopott vagy elfelejtett süti nem marad örökre érvényes.
+4.  **`GET /api/login_info`:** Autentikáció nélkül elérhető, nem titkos végpont, ami visszaadja a szerver aktuális `pbkdf2_iterations` értékét. Ezt a webes login-oldal mellett az Android widget is használja, hogy a kulcsszármaztatáshoz mindig a szerverrel megegyező iterációszámot alkalmazza, akkor is, ha az a `config.json`-ban az alapértelmezettől eltérő értékre lett állítva (lásd README, 5. szakasz).
+
+### Reszponzív és Mobil Navigáció (Kliens Oldal)
+
+A webes műszerfal reszponzív CSS elrendezést használ, 1024 pixeles törésponttal. E felett asztali, kéthasábos elrendezés jelenik meg; alatta egykártyás mobil nézet.
+
+*   **Mobil Nézet Kezelő (`showSection`):** A mobil szekció-váltást kizárólag kliens oldali JavaScript kezeli. A mobilos lebegő menüben egy elemre koppintva a `showSection(sectionId)` meghívódik, amely elrejti a többi főkonténer-kártyát és csak az aktív konténert jeleníti meg teljes szélességben.
+
+### Végpontok
+
+*   **`GET /`**: A műszerfal HTML-jét adja vissza (hitelesítve: `DASHBOARD_HTML`, hitelesítés nélkül: `LOGIN_HTML`).
+*   **`GET /background.png`**: A háttérképet adja vissza a futtatható könyvtárból (kezeli a PyInstaller ideiglenes könyvtár-környezeteket).
+*   **`GET /api/status`**: A `shared_state` szótárat adja vissza JSON formátumban (hitelesítés szükséges).
+*   **`GET /api/login_info`**: Nyilvános, hitelesítés nélkül elérhető végpont, visszaadja a `{"pbkdf2_iterations": <int>}` értéket. Lehetővé teszi, hogy bármely kliens (webes bejelentkezési oldal, Android widget) a szerver *aktuális* iterációszámával származtassa a session kulcsot a hardkódolt alapértelmezés helyett.
+*   **`POST /api/login`**: Nyilvános bejelentkezési végpont. `{"clientNonce": "...", "authProof": "..."}` PSK kihívás-válasz csomagot fogad. Siker esetén kriptográfiailag biztonságos session tokent generál 24 órás lejárattal, elmenti a memóriában, és `Set-Cookie: session=<token>; HttpOnly; Path=/; SameSite=Lax` fejléccel adja vissza.
+*   **`POST /api/logout`**: Lezárja az aktív session-t. Törli a tokent a memóriából és lejárttá teszi a sütit (`Max-Age=0`).
+*   **`POST /api/unlock`**: Törli a Lockdown / Cooldown biztonsági állapotot (hitelesítés szükséges).
+*   **`POST /api/config`**: Konfigurációs frissítéseket fogad (hitelesítés szükséges). Validálja, elmenti `config.json`-ba és azonnal frissíti a futó vezérlőhurokat. A `forced_schedule` mező szigorúan validálódik szerver oldalon (lásd 6. szakasz) az elfogadás előtt.
+*   **`POST /api/mode`**: Módosítja az üzemmódot (monitoring / auto / schedule / force, hitelesítés szükséges).
+*   **`POST /api/force_submode`**: Kézi felülbírálati almódot választ (hitelesítés szükséges).
+*   **`POST /api/set_current`**: Kézzel korlátozza a töltési áramerősséget (hitelesítés szükséges).
+*   **`POST /api/sim_toggle` / `POST /api/sim_data`**: Szimulációs módot kapcsol és mock telemetria paramétereket állít (hitelesítés szükséges).
+
+---
+
+## 5. Fejlesztői Útmutató Egyéni Adaptációkhoz
+
+Ha ezt a vezérlőt különböző hardvereszközökhöz szeretnéd adaptálni:
+
+### Különböző Inverter Márka Támogatása
+
+Ha a Deye helyett más invertert kell kezelni (pl. Fronius, Huawei, Victron):
+1. A `run_inverter_polling()`-ban cseréld le a `pysolarmanv5`-öt az inverter SDK-jára vagy könyvtárára (pl. Modbus TCP kliens, REST API, MQTT kliens).
+2. Olvasd ki a megfelelő teljesítményértékeket (Grid, UPS/Ház fogyasztás, PV, Akku SoC, Akku teljesítmény).
+3. Írd ezeket az értékeket a `shared_state` megfelelő kulcsaiba a `state_lock` kontextuson belül.
+
+### Különböző EVSE (Autótöltő) Támogatása
+
+Ha a BESEN helyett más töltőt kell vezérelni (pl. Go-e, Tesla Wall Connector, Shelly relék):
+1. A `run_ble_client()`-ben cseréld le a BLE Bleak klienst a töltőd natív API kliensére (pl. HTTP REST hívások, helyi TCP socket, MQTT üzenetek).
+2. A `run_charge_controller()` kiértékelésének végén az `ble_command_queue` csomagolása helyett közvetlenül aktiváld a töltőd start/stop vagy áramkorlát parancsait.
+
+---
+
+## 6. Fejlett Biztonság és Konfigurációs Validáció
+
+### 6.1 Áramkorlát (Current Limit) Váltás
 A legtöbb "buta" töltőhöz hasonlóan, a BESEN BS20 **nem támogatja a töltési Amper megváltoztatását repülés (töltés) közben**. A szoftver úgy kerüli meg ezt a problémát, hogy ha a felhasználó a webes felületen megváltoztatja az Amper limitet, a vezérlő:
 1.  STOP parancsot küld a jelenlegi munkamenetre.
 2.  Beállít egy Cooldown időzítőt (pl. 15 másodperc), hogy a töltő reléi kioldjanak és a hardver visszaálljon.
 3.  15 másodperc múlva START parancsot küld az ÚJ Amper limit értékkel.
 
-### 4.2 Webes Műszerfal Konfiguráció Automatikus Mentése
+A töltőáram csúszkán a felhasználó mindig egy konkrét 6-16A értéket állít be. A korábbi "szoftveres szabályzás kikapcsolása" jelölőnégyzet (ami `0` értéket küldött és a `charging_logic.py`-ban `0 → 16A` átváltást váltott ki) megszűnt — `charger_max_amps` értéke mindig érvényes, konkrét szám kell legyen (6-16).
+
+### 6.2 Webes Műszerfal Konfiguráció Automatikus Mentése
 Minden konfigurációs változás (pl. Akku SoC szintek átállítása) a műszerfalról a `/api/config` REST végponton keresztül érkezik POST kérésként. A megosztott memóriában történő frissítés után a rendszer azonnal kiírja azt a lemezre (`config.json`), biztosítva, hogy egy esetleges áramszünet után a rendszer pontosan ugyanott tudja folytatni.
-*   **Konfiguráció Validáció:** A mentés során (valamint a fájlból történő betöltéskor) a rendszer kettős védelmet alkalmaz a logikai hibák ellen. Ha a felhasználó az akkumulátor indítási szintjét (`start_soc`) alacsonyabbra állítaná a leállítási küszöbnél (`stop_soc`), a kliensoldali JavaScript és a szerveroldali API is elutasítja a módosítást egy hibaüzenettel. Rendszerinduláskor (fájlból olvasva) pedig automatikusan azonos szintre emeli az értékeket, megakadályozva a végtelen kapcsolási ciklusok kialakulását.
+*   **Atomi, szerver oldali validáció (üres mező elleni védelem):** A `/api/config` handler az összes numerikus mező értékét kiolvassa `config_data`-ból ELŐSZÖR, alkalmazás ELŐTT. Ha bármelyik `null` értékű (JSON `null`, amit a kliens küld üres mező esetén — `JSON.stringify(NaN) === null`) VAGY `charger_max_amps` nem esik 6-16 közé: a handler `load_config()` hívással visszaállítja `shared_state`-t az utolsó jó `config.json`-ból (semmilyen érték sem módosul), majd `{"status": "error", "message": "Hibás adattartalom miatt visszaállt a konfig az eredetire"}` JSON választ küld. Csak ha minden mező érvényes, alkalmazza azokat egyszerre, `with state_lock:` blokkon belül (atomi). Ez a mechanizmus akkor is véd, ha jövőbeni kliens kód tévesen `|| fallback` koerciókat tartalmaz — mert az üres mező `NaN`-t ad, ami `null`-ként érkezik a szerverre.
+*   **Konfiguráció Validáció:** A `start_soc < stop_soc` ellenőrzés az alkalmazás előtt fut a szerveroldalon. Rendszerinduláskor (fájlból olvasva) a `load_config()` szintén elvégzi ezt az ellenőrzést és automatikusan azonos szintre emeli az értékeket, megakadályozva a végtelen kapcsolási ciklusok kialakulását.
 *   **Heti ütemezés (`forced_schedule`) szigorú validációja:** A `POST /api/config`-ra érkező `forced_schedule` tömböt a szerver `validate_forced_schedule()` függvénye ellenőrzi, mielőtt bármi bekerülne a `shared_state`-be vagy a `config.json`-be: pontosan 7 elem, mindegyik a hét egy-egy napjára (duplikáció nélkül, a magyar napnevek whitelistjéből), `start`/`stop` szigorú `HH:MM` formátumban, `amps` 6–16 közötti egész szám. Enélkül egy hibás `day` érték a dashboard `innerHTML`-jébe kerülve tárolt XSS-t okozhatott volna, egy hibás listaelem pedig a következő újraindításkor `load_config()`-ot omlasztotta volna össze (a program véglegesen le nem induló állapotba kerülhetett volna, amíg valaki kézzel ki nem javítja a `config.json`-t). A `renderSchedule()` kliensoldali függvény védekező második rétegként a napnevet `textContent`-tel írja be `innerHTML` helyett, a `load_config()` pedig `try/except`-tel védi magát egy esetleg mégis sérült `config.json` ellen.
 
-### 4.3 Állapotellenőrzés
+### 6.3 Állapotellenőrzés
 Amikor egy töltés megkezdődik, a szoftver `simulated_charging_active = True`-ra áll, és figyeli a Hálózat (Grid) áramfelvételét, hogy megerősítse: az autó ténylegesen csatlakoztatva van és vesz fel áramot. A napló kiírja a "Külső vezérlésű töltés észlelve" (External charging session detected) üzenetet, ha valaki manuálisan (pl. a fali fizikai gombbal vagy a telefonos gyári applikációval) indította el a töltést a szoftver tudta nélkül. Ilyenkor a vezérlő átadja az irányítást és nem avatkozik be, amíg az manuálisan le nem áll (kivétel a vészleállítás túlterhelés miatt).
 
-### 4.4 Fejlett Biztonság: Cooldown és Lockdown
+### 6.4 Fejlett Biztonság: Cooldown és Lockdown
 A töltő reléinek és vezérlőjének védelme érdekében a gyors állapotváltások (flapping) és végtelen ciklusok ellen beépített védelmek:
 1. **Cooldown (20s ablak):** Egy csúszó 20 másodperces időablak legfeljebb 2 állapotváltást (pl. 1 start, 1 stop) engedélyez. A harmadik váltást ebben az ablakban a rendszer blokkolja egy 20 másodperces "lehűlési" várakozással.
 2. **Lockdown (40s ablak):** Ha 40 másodpercen belül 4 állapotváltás történik, az 5. próbálkozásnál a rendszer "Lockdown" (Zárolás) állapotba kerül, és letilt minden további automatikus vagy normál kézi parancsot, amíg a felhasználó a műszerfalon keresztül fel nem oldja (Unlock).
@@ -132,58 +201,61 @@ A töltő reléinek és vezérlőjének védelme érdekében a gyors állapotvá
 4. **Hard Stop Override (Kényszerleállítás):** A műszerfalról kiadott manuális "Hard STOP" (kényszerített leállítás) parancs biztonsági okokból mindig, kivétel nélkül megkerüli a Cooldown és Lockdown korlátozásokat.
 5. **Feloldás csak bejelentkezve:** A `/api/unlock` végpont (ami a Lockdown-t oldja fel) ugyanúgy az autentikációs ellenőrzés (`is_authenticated()`) mögé van kötve, mint minden más állapotmódosító végpont — így a helyi hálózaton bejelentkezés nélkül senki nem tudja feloldani a biztonsági zárolást.
 
-### 4.5 Továbbfejlesztett Ház Túlterhelés Védelem
+### 6.5 Továbbfejlesztett Ház Túlterhelés Védelem
 A ház túlterhelés védelmi logikája a teljes terhelést a `(UPS Terhelés + Töltő Terhelés)` képlettel számolja ki. Ha ez az összeg meghaladja a beállított `house_power_limit_w` konfigurációt, a töltő azonnal leáll. Ez a biztonsági vészleállítás szintén megkerüli a Cooldown és Lockdown késleltetéseket, hogy megelőzze a kismegszakító leoldását.
 
-### 4.6 Központi Ping-Pong Watchdog (Supervisor)
+### 6.6 Központi Ping-Pong Watchdog (Supervisor)
 A `main.py`-ban található egy dedikált végtelen ciklus, amely 5 másodpercenként felügyeli a három fő aszinkron feladat (Inverter, BLE, Töltésvezérlő) egészségét. A Watchdog kétféle hibát detektál:
 1. **Crash védelem:** Ha a feladat `task.done()` állapota True, ellenőrzi, hogy dobott-e kivételt (`task.result()`). Ha a szál egy hiba miatt leállt, a Watchdog elkapja a kivételt és újra létrehozza a feladatot.
 2. **Freeze (Befagyás) védelem:** Minden háttérszál a természetes futási ciklusának végén egy "PONG" időbélyeget frissít a `shared_state["task_pong"]` szótárban. Ha a Watchdog azt észleli, hogy egy szál több mint 30 másodperce nem küldött PONG jelet (pl. egy blokkoló hálózati művelet miatt), akkor a beragadt feladatot `task.cancel()` hívással megszakítja, és a következő ciklusban tisztán újraindítja. Ez az architektúra biztosítja a robusztus működést anélkül, hogy mesterséges pingeket kényszerítene a szálakba.
 
-### 4.7 Végpontok közötti API Titkosítás (E2EE)
-A webes Műszerfal kliens oldali JavaScript kódja és a Python HTTP szerver közötti forgalom hálózati lehallgatás (sniffing) elleni védelme beépített, katonai szintű kriptográfiát használ:
-1.  **Jelszó Ellenőrzés:** A jelszó (plaintext) soha nem kerül elküldésre a hálózaton. A böngésző egy HMAC-SHA256 alapú `auth_proof`-ot küld (amely a szerver által generált `client_nonce` alapján készül, a 100 000 iterációs PBKDF2-SHA256 kulccsal).
-2.  **Transzparens Payload Titkosítás:** A sikeres bejelentkezés után a kliens oldalon felülírt `fetch()` API automatikusan titkosít minden HTTP POST body-t. Korábban a böngésző natív WebCrypto API-ját használtuk (AES-GCM), de a mobil böngészők (pl. Chrome, Vivaldi) HTTP-n történő tiltása miatt a kliens oldal teljesen függetlenített CryptoJS alapokra állt át. A payload így AES-256-CBC módban (PKCS7 paddinggal) titkosítódik, amelyhez utólagos HMAC-SHA256 (Encrypt-then-MAC) ellenőrzőösszeg csatlakozik a manipulációk elkerülésére. A szerver a `pycryptodome` csomaggal fejti vissza a kéréseket, a válaszok JSON objektumai pedig ugyanígy titkosítva és dedikált MAC aláírással érkeznek vissza a klienshez.
-3.  **Session lejárat:** Minden `active_sessions`-ben tárolt bejelentkezési token mostantól szerveroldali lejárati időbélyeget is kap (`SESSION_TTL_SECONDS`, alapértelmezetten 24 óra). A lejárt tokent a rendszer a következő hozzáférésnél automatikusan érvénytelennek tekinti és törli, így egy ellopott vagy elfelejtett süti nem marad örökre érvényes.
-4.  **`GET /api/login_info`:** Autentikáció nélkül elérhető, nem titkos végpont, ami visszaadja a szerver aktuális `pbkdf2_iterations` értékét. Ezt a webes login-oldal mellett az Android widget is használja, hogy a kulcsszármaztatáshoz mindig a szerverrel megegyező iterációszámot alkalmazza, akkor is, ha az a `config.json`-ban az alapértelmezettől eltérő értékre lett állítva (lásd README, 5. szakasz).
-
 ---
 
-## 5. Legutóbbi javítások (2026-07-08)
+## 7. Legutóbbi javítások
+
+### 2026-07-08
 
 Egy átvizsgálási kör a következő hibákat tárta fel és javította — itt gyűjtve össze, mivel a fenti szakaszokban leírt viselkedést is érintik:
 
 *   **`line_id` NameError:** A fázisszám-számítás korábban a ciklus közepén futott le, azután, hogy a kézi felülbírálási flag-ek már felhasználhatták volna a `line_id`-t egy korai `continue`-ban. Áthelyezve a ciklus legelejére (lásd 2.2 szakasz).
-*   **`/api/unlock` autentikáció-bypass:** A végpontot korábban az `is_authenticated()` ellenőrzés előtt kezelte a szerver, így bejelentkezés nélkül bárki feloldhatta a Lockdown-t a helyi hálózaton. Áthelyezve az autentikációs kapu mögé (lásd 4.4/5. pont).
-*   **`forced_schedule` validáció (tárolt XSS + újraindításkori összeomlás):** Lásd a teljes leírást a 4.2 szakaszban.
-*   **Session lejárat:** A bejelentkezési session-ök korábban sosem jártak le. Mostantól 24 óra után automatikusan érvénytelenné válnak (lásd 4.7 szakasz).
+*   **`/api/unlock` autentikáció-bypass:** A végpontot korábban az `is_authenticated()` ellenőrzés előtt kezelte a szerver, így bejelentkezés nélkül bárki feloldhatta a Lockdown-t a helyi hálózaton. Áthelyezve az autentikációs kapu mögé (lásd 6.4/5. pont).
+*   **`forced_schedule` validáció (tárolt XSS + újraindításkori összeomlás):** Lásd a teljes leírást a 6.2 szakaszban.
+*   **Session lejárat:** A bejelentkezési session-ök korábban sosem jártak le. Mostantól 24 óra után automatikusan érvénytelenné válnak (lásd 4. szakasz).
 *   **Felesleges lemezírás üresjáratban:** A BLE telemetria-feldolgozó korábban minden nem-töltő telemetria csomagnál (kb. másodpercenként) meghívta a `save_config_file()`-t, ami felesleges lemez-/SD-kártya-terhelést jelentett gyengébb hardveren (pl. Raspberry Pi). Mostantól csak akkor ment, ha ténylegesen le kellett zárni egy aktív munkamenetet.
 *   **Halott kód eltávolítása:** Két, fejlesztés közben ott felejtett "VÁZLAT" kódrészlet (a `run_charge_controller()` és a `ble_notification_received()` végén, a fő `while True` ciklus után, tehát sosem futottak le), valamint a `ControllerHTTPHandler` osztályon egy duplikált, elavult `is_authenticated()` / `get_cookie()` / `log_message()` metódus-definíció törölve lett. Ez utóbbi nem csak felesleges kód volt: mivel Python egy osztályban az utoljára definiált azonos nevű metódust tartja meg, ez a duplikátum csendben felülírta volna a session-lejáratot már ismerő `is_authenticated()`-et, ami a fenti session-lejárat javítást hatástalanná tette volna.
 *   **Android widget — PBKDF2 iterációszám:** A widget korábban hardkódolt `100000`-es iterációszámmal származtatta a session kulcsot, miközben a szerver `pbkdf2_iterations` értéke felhasználó által állítható (a README kifejezetten ajánlja csökkenteni gyengébb hardveren, pl. Raspberry Pi Zero-n). A widget mostantól bejelentkezés előtt lekéri ezt az értéket a `GET /api/login_info`-ról, `100000`-es fallback-kel, ha a lekérdezés bármiért sikertelen.
 *   **Android widget — `allowBackup`:** Az `AndroidManifest.xml` korábban `android:allowBackup="true"`-t állított, miközben a dashboard jelszó titkosítás nélkül, plaintext `SharedPreferences`-ben tárolódik — ez `adb backup`-pal kinyerhetővé tette a jelszót nem rootolt eszközön is. Mostantól `"false"`.
 
-### 2026-07-23: elavult munkamenet-kulcs miatt beragadt dashboard-állapot (biztonsági szempontból is releváns hiba)
+### 2026-07-29
 
-*   **Tünet:** mobil böngészőn (jellemzően háttérből visszatérve) a dashboard a beépített alapértékeket mutatta valós adatok helyett (pl. töltőáram-csúszka 16A-n, napelemes mód kikapcsolva) — ez korábban egy alkalommal ahhoz vezetett, hogy a töltő ténylegesen a beállítottnál (6A) magasabb (15A) árammal indult töltésbe.
-*   **Gyökérok:** a titkosított API-válaszok kliens oldali visszafejtése (`window.fetch()` felülírás) egy elavult, `sessionStorage`-ban ragadt munkamenet-kulcs esetén (pl. a telefon a lapot háttérből ébreszti fel egy közben újraindult/lejárt szerver-session mellett) csendben elhasalt, és a **még titkosított** válaszcsomagot adta tovább úgy, mintha az valós adat lenne. Az `updateStatus()` ezt a szemetet dolgozta fel, és a beállítás-feltöltő logika — mivel csak *"életében először"* futott le (`configLoaded` jelzővel védve) — **feltétel nélkül** lezárta magát erre a hibás állapotra, örökre beragasztva azt, amíg nem történt teljes oldal-újratöltés.
-*   **Javítás:** a `fetch()`-felülírás mostantól különválasztja a "nem is titkosított válasz" és a "kifejezetten titkosítottnak jelölt, de nem visszafejthető" eseteket — az utóbbi soha nem jut tovább valós adatként, a hívó kód egyszerűen kihagyja azt a lekérdezési ciklust. Három egymást követő sikertelen visszafejtés után a kód elavultnak tekinti a kulcsot, törli, és kényszerít egy friss bejelentkezést (új, érvényes titkosított kapcsolatot építve). Emellett a `configLoaded` védelem is szigorodott: csak akkor zárja le magát, ha a kapott adat ténylegesen valós konfigurációnak néz ki (`charger_max_amps` szám, `control_mode` szöveg).
+Biztonsági javítások — az eredeti incidens gyökérokait szünteti meg, ahol a rendszer betöltetlen/sérült `config.json` esetén hihető, de hamis alapértékekkel indult el, és a webes felületen üres mezőkkel is lehetséges volt menteni.
+
+*   **`config.py` — beégetett alapértékek eltávolítása:** A `DEFAULT_CONFIG` és a `shared_state` inicializálás hat numerikus vezérlési mezőjén (`start_soc`, `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`, `house_power_limit_w`, `charger_max_amps`) az alapértékek `None`-ra változtak. A `load_config()` mostantól csak akkor konvertál `int()`-re, ha az érték nem `None`. Ha `config.json` hiányzik, a `shared_state` ezekben a mezőkben `None`-t tartalmaz; a `charging_logic.py` ezzel `TypeError`-t dob az első összehasonlításnál, amit a `main.py` watchdog elkapva biztonságosan újraindítja a taszkot — töltés nem indul.
+
+*   **`charging_logic.py` — `0 → 16A` konverziós minta törlése:** A `start_amps = 16 if charger_max_amps == 0 else charger_max_amps` és a `start_amps = 16 if target_amps == 0 else target_amps` sorok törölve (három előfordulás). A `charger_max_amps == 0` eredeti kettős jelentése (szándékos "nem felügyelt" vs. betöltetlen/hibás adat) megszűnt: a `charger_max_amps` mostantól mindig konkrét, érvényes szám (6-16), amit a `/api/config` szerver oldali validáció garantál.
+
+*   **`dashboard.py` — "Töltőáram szoftveres szabályozásának kikapcsolása" funkció teljes törlése:** A HTML jelölőnégyzetek (`auto_unmanaged_current`, `force-unmanaged-container`), a `toggleUnmanagedCurrent(mode)` JS függvény, és az összes kapcsolódó `unmanaged` ág (a `scheduleAmpsSave`, `checkAutoAmpsChanged`, `checkForceAmpsChanged` és `updateStatus()` függvényekben) törölve.
+
+*   **`dashboard.py` — `saveAutoConfig` üres mező koerciók törlése:** Az `|| 100` és `|| 0` fallback koerciók törölve az öt numerikus mezőről. Üres mező esetén `parseInt` → `NaN` → `JSON.stringify` → `null` kerül a kérésbe, amit a szerver elutasít. Hiba esetén (szerver `status: error` vagy hálózati hiba) a kliens megjeleníti a hibaüzenetet és `updateStatus()`-szal visszatölti a formot a mentett értékekre.
+
+*   **`dashboard.py` — `/api/config` atomi validáció:** Lásd a 6.2 szakasz frissített leírását. A korábbi szekvenciális, mezőnkénti alkalmazás helyett az összes numerikus mező egyszerre validálódik és alkalmaz, `load_config()`-alapú visszaállítással hibánál.
 
 ---
 
-## 6. Android Widget (`AndroidWidget/`)
+## 8. Android Widget (`AndroidWidget/`)
 
 A projekthez tartozik egy különálló natív Android-alkalmazás (Kotlin), amely egy kezdőképernyős widgettel jeleníti meg a rendszer élő telemetriáját. Saját APK-ként fordul, a GitHub Actions workflow (`.github/workflows/android_widget_build.yml`) minden `AndroidWidget/**` érintő pushra lefuttatja az `assembleDebug`-ot, és artifactként feltölti az APK-t.
 
-### 6.1 Komponensek
+### 8.1 Komponensek
 
 *   **`DeyeWidgetProvider`** (`AppWidgetProvider`): a widget életciklusát kezeli. Az `onUpdate()` felrakja a nézetet, beállítja a koppintás-kezelőt, majd `KEEP` politikával elindítja a frissítő hurkot és a 15 perces életben tartó munkát. Az `onDisabled()` (az utolsó widget levételekor) mindkettőt leállítja.
 *   **`WidgetConfigActivity`**: a widget kihelyezésekor megnyíló beállító képernyő. A `DeyePrefs` nevű `SharedPreferences`-be menti a szerver IP-t, a dashboard jelszót (plaintext) és a háttér átlátszóságot (`bg_alpha`).
-*   **`WidgetUpdateWorker`** (`Worker`): a fő frissítő hurok (lásd 6.3).
-*   **`WidgetKeepAliveWorker`** (`Worker`): 15 percenként futó biztonsági háló, amely újraéleszti a fő hurkot, ha az meghalt volna (lásd 6.4).
-*   **`ScreenUnlockReceiver`** (`BroadcastReceiver`): best-effort képernyő- és boot-esemény figyelő; a frissítési lánc **nem** épül rá kizárólagosan (lásd 6.4).
+*   **`WidgetUpdateWorker`** (`Worker`): a fő frissítő hurok (lásd 8.3).
+*   **`WidgetKeepAliveWorker`** (`Worker`): 15 percenként futó biztonsági háló, amely újraéleszti a fő hurkot, ha az meghalt volna (lásd 8.4).
+*   **`ScreenUnlockReceiver`** (`BroadcastReceiver`): best-effort képernyő- és boot-esemény figyelő; a frissítési lánc **nem** épül rá kizárólagosan (lásd 8.4).
 *   **`CryptoUtils`**: a szerverrel megegyező kulcsszármaztatás és E2EE visszafejtés (PBKDF2, AES-256-CBC, HMAC-SHA256).
 
-### 6.2 Adat- és hitelesítési folyamat
+### 8.2 Adat- és hitelesítési folyamat
 
 A widget ugyanazt a titkosított protokollt használja, mint a webes felület:
 
@@ -193,11 +265,11 @@ A widget ugyanazt a titkosított protokollt használja, mint a webes felület:
 
 Session lejárat / `401` esetén a widget törli a memóriában tartott tokent és kulcsot, és a következő körben újra bejelentkezik.
 
-### 6.3 Frissítési modell
+### 8.3 Frissítési modell
 
 A `widget_info.xml`-ben `updatePeriodMillis="0"` — a rendszer **nem** végez periodikus frissítést; a widget maga menedzseli a frissítést egy folyamatos hurokkal. A `WidgetUpdateWorker.doWork()` addig ismétel (kb. 5 másodperces ciklusidővel), amíg a képernyő be van kapcsolva (`PowerManager.isInteractive`) és a WiFi elérhető. Lezárt képernyőn a hurok magától leáll (energiatakarékosság), WiFi hiányában pedig üres/átlátszó állapotot mutat.
 
-### 6.4 WiFi-ellenállóság (hálózatváltás-kezelés)
+### 8.4 WiFi-ellenállóság (hálózatváltás-kezelés)
 
 Egy korábbi hibában a widget adata „beragadt", ha a felhasználó elhagyta a saját WiFi hatósugarát, majd visszatért. A gyökérokok több rétegben javítva lettek:
 
@@ -208,3 +280,4 @@ Egy korábbi hibában a widget adata „beragadt", ha a felhasználó elhagyta a
 *   **Koppintás-mentőöv:** A widgetre koppintva az `onUpdate()` `KEEP`-pel újraindítja a hurkot, kézi végső lehetőségként.
 
 A `ScreenUnlockReceiver` (`USER_PRESENT` / `SCREEN_OFF` / `BOOT_COMPLETED`) csak gyorsítás azokon az eszközökön, ahol az esemény megérkezik; az Android 8+ implicit broadcast korlátozásai (és az, hogy a `SCREEN_OFF` manifest-receivernek nem kézbesíthető) miatt a frissítés megbízhatósága nem rá, hanem a fenti mechanizmusokra épül.
+

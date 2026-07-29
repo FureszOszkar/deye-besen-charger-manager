@@ -1514,13 +1514,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 </div>
                                 <input type="range" id="auto_charger_max_amps" min="6" max="16" step="1" oninput="checkAutoAmpsChanged()">
                             </div>
-                            <div class="checkbox-group" style="margin-top: 0.3rem;">
-                                <input type="checkbox" id="auto_unmanaged_current" onchange="toggleUnmanagedCurrent('auto')">
-                                <label for="auto_unmanaged_current" style="font-size: 0.85rem; cursor:pointer; display: inline-flex; align-items: center;">
-                                    Töltőáram szoftveres szabályzásának kikapcsolása
-                                    <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha bejelöli, a szoftver nem fogja dinamikusan állítani az áramerősséget. Az autó a saját belső beállítása vagy a töltő fizikai gombja szerinti maximális sebességgel fog tölteni.</span></span>
-                                </label>
-                            </div>
                             <div id="auto-apply-container" style="display:none; gap: 1rem; margin-top:0.8rem; width: 100%;">
                                 <button type="button" class="action-btn action-btn-stop" style="padding:0.5rem; font-size:0.8rem;" onclick="applyAutoAmps(true)">Alkalmaz (leállítással)</button>
                                 <button type="button" class="action-btn action-btn-start" style="padding:0.5rem; font-size:0.8rem; background:linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);" onclick="applyAutoAmps(false)">Mentés újraindítás nélkül</button>
@@ -1615,13 +1608,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 <span><span class="slider-val-label" id="force-amps-val">16</span> A</span>
                             </div>
                             <input type="range" id="force_charger_max_amps" min="6" max="16" step="1" oninput="checkForceAmpsChanged()">
-                        </div>
-                        <div class="checkbox-group" id="force-unmanaged-container" style="margin-top: 0.3rem;">
-                            <input type="checkbox" id="force_unmanaged_current" onchange="toggleUnmanagedCurrent('force')">
-                            <label for="force_unmanaged_current" style="font-size: 0.85rem; cursor:pointer; display: inline-flex; align-items: center;">
-                                Töltőáram szoftveres szabályzásának kikapcsolása
-                                <span class="tooltip-container">ⓘ<span class="tooltip-text">Ha bejelöli, a kézi töltés a töltő fizikai beállítása szerinti maximális sebességgel fog futni.</span></span>
-                            </label>
                         </div>
                         <div id="force-apply-container" style="display:none; gap: 1rem; margin-top:0.8rem; width: 100%; margin-bottom: 0.5rem;">
                             <button type="button" class="action-btn action-btn-start" style="padding:0.5rem; font-size:0.8rem; background:linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); width: 100%;" onclick="applyForceAmpsWithRestart()">Alkalmaz újraindítással</button>
@@ -1980,12 +1966,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <script>
         // === PSK TITKOSÍTÁSI MODUL (Kliens oldal, CryptoJS alapú AES-CBC + HMAC) ===
         let _sessionKeyHex = null;
-        // Egymást követő sikertelen visszafejtések számlálója. Ha a sessionStorage-ban
-        // tárolt kulcs elavult (pl. a telefon háttérből ébresztette fel a lapot egy
-        // közben újraindult/lejárt szerver-session mellett), a MAC-ellenőrzés mindig
-        // el fog hasalni. Néhány próbálkozás után ezt tényleges munkamenet-problémának
-        // tekintjük és kényszerítünk egy friss bejelentkezést.
-        let _pskDecryptFailCount = 0;
 
         // SessionKey betöltése a sessionStorage-ból (a login oldal mentette oda)
         (function initPSK() {
@@ -2066,43 +2046,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             // Válasz visszafejtése, ha titkosított
             if (_sessionKeyHex && response.ok) {
-                let json;
                 try {
                     const cloned = response.clone();
-                    json = await cloned.json();
-                } catch (e) {
-                    // Nem JSON válasz -- eredeti response visszaadása változatlanul
-                    return response;
-                }
-
-                if (json && json.enc) {
-                    // A szerver kifejezetten titkosított csomagként jelölte -- ha innentől
-                    // bármi hibázik (hiányos mezők vagy MAC-hiba), azt a munkamenet-kulcs
-                    // elavulásának tekintjük, NEM adjuk tovább a még titkosított/hibás
-                    // csomagot a hívónak (pl. updateStatus()), mert azt téves módon valós
-                    // konfigurációként dolgozná fel (lásd a korábbi 16A-incidenst).
-                    try {
-                        if (!json.iv || !json.data || !json.mac) {
-                            throw new Error("Hiányos titkosított válasz (iv/data/mac hiányzik)");
-                        }
+                    const json = await cloned.json();
+                    if (json && json.enc && json.iv && json.data && json.mac) {
                         const decrypted = _pskDecrypt(_sessionKeyHex, json.iv, json.data, json.mac);
-                        _pskDecryptFailCount = 0;
                         return new Response(JSON.stringify(decrypted), {
                             status: response.status,
                             statusText: response.statusText,
                             headers: response.headers
                         });
-                    } catch (e) {
-                        _pskDecryptFailCount++;
-                        console.error(`PSK visszafejtés sikertelen (${_pskDecryptFailCount}/3):`, e);
-                        if (_pskDecryptFailCount >= 3) {
-                            console.error("Munkamenet-kulcs elavultnak tekintve. Új bejelentkezés kényszerítése...");
-                            sessionStorage.removeItem('_psk_key_hex');
-                            sessionStorage.removeItem('_psk_nonce');
-                            window.location.reload();
-                        }
-                        throw e;
                     }
+                } catch (e) {
+                    // Nem JSON vagy nem titkosított válasz: eredeti response visszaadása
                 }
             }
 
@@ -2225,9 +2181,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             clearTimeout(ampsSaveTimers[mode]);
             ampsSaveTimers[mode] = setTimeout(() => {
                 ampsSaveChain = ampsSaveChain.then(() => {
-                    const unmanaged = document.getElementById(mode + '_unmanaged_current').checked;
                     const slider = document.getElementById(mode + '_charger_max_amps');
-                    const val = unmanaged ? 0 : parseInt(slider.value);
+                    const val = parseInt(slider.value);
                     return (mode === 'auto') ? saveAutoAmpsSilent(val) : saveForceAmpsSilent(val);
                 });
             }, 400);
@@ -2275,17 +2230,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function checkAutoAmpsChanged() {
             const slider = document.getElementById('auto_charger_max_amps');
-            const unmanaged = document.getElementById('auto_unmanaged_current').checked;
             const container = document.getElementById('auto-apply-container');
-            
-            if (unmanaged) {
-                slider.disabled = true;
-                document.getElementById('auto-amps-val').innerText = 'Nem felügyelt (0A)';
-                container.style.display = 'none';
-                return;
-            }
-            
-            slider.disabled = false;
             const currentVal = parseInt(slider.value);
             document.getElementById('auto-amps-val').innerText = currentVal;
             
@@ -2304,17 +2249,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function checkForceAmpsChanged() {
             const slider = document.getElementById('force_charger_max_amps');
-            const unmanaged = document.getElementById('force_unmanaged_current').checked;
             const container = document.getElementById('force-apply-container');
-            
-            if (unmanaged) {
-                slider.disabled = true;
-                document.getElementById('force-amps-val').innerText = 'Nem felügyelt (0A)';
-                if (container) container.style.display = 'none';
-                return;
-            }
-            
-            slider.disabled = false;
             const currentVal = parseInt(slider.value);
             document.getElementById('force-amps-val').innerText = currentVal;
             
@@ -2355,40 +2290,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const container = document.getElementById('force-apply-container');
                 if (container) container.style.display = 'none';
                 updateStatus();
-            }
-        }
-
-        async function toggleUnmanagedCurrent(mode) {
-            const isChecked = document.getElementById(mode + '_unmanaged_current').checked;
-            const slider = document.getElementById(mode + '_charger_max_amps');
-            slider.disabled = isChecked;
-            
-            const isCharging = document.getElementById('plug-status').innerText.toLowerCase().includes('aktív');
-            
-            const sliderWrapper = document.getElementById(mode + '-slider-wrapper');
-            if (sliderWrapper) {
-                sliderWrapper.style.display = isChecked ? 'none' : 'block';
-            }
-            
-            const val = isChecked ? 0 : parseInt(slider.value);
-            document.getElementById(mode + '-amps-val').innerText = isChecked ? 'Nem felügyelt (0A)' : val;
-            
-            if (isCharging) {
-                const origVal = (mode === 'auto') ? originalAutoAmps : originalForceAmps;
-                const applyContainer = document.getElementById(mode + '-apply-container');
-                if (applyContainer) {
-                    if (val !== origVal) {
-                        applyContainer.style.display = 'flex';
-                    } else {
-                        applyContainer.style.display = 'none';
-                    }
-                }
-            } else {
-                // A mentés a közös, sorosított ütemezőn keresztül megy, hogy ne versenyezhessen
-                // egy éppen függőben lévő csúszka-mentéssel
-                scheduleAmpsSave(mode);
-                const applyContainer = document.getElementById(mode + '-apply-container');
-                if (applyContainer) applyContainer.style.display = 'none';
             }
         }
 
@@ -2814,27 +2715,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     if (lastChargeView) lastChargeView.style.display = 'none';
                 }
 
-                const forceUnmanagedContainer = document.getElementById('force-unmanaged-container');
                 const forceSliderWrapper = document.getElementById('force-slider-wrapper');
                 const autoSliderWrapper = document.getElementById('auto-slider-wrapper');
                 const forceApplyContainer = document.getElementById('force-apply-container');
                 const autoApplyContainer = document.getElementById('auto-apply-container');
-                
+
                 if (isCharging) {
-                    if (forceUnmanagedContainer) forceUnmanagedContainer.style.display = 'block';
-                    
-                    const isForceUnmanaged = document.getElementById('force_unmanaged_current').checked;
-                    if (forceSliderWrapper) forceSliderWrapper.style.display = isForceUnmanaged ? 'none' : 'block';
-                    
-                    const isAutoUnmanaged = document.getElementById('auto_unmanaged_current').checked;
-                    if (autoSliderWrapper) autoSliderWrapper.style.display = isAutoUnmanaged ? 'none' : 'block';
-                } else {
-                    if (forceUnmanagedContainer) forceUnmanagedContainer.style.display = 'none';
                     if (forceSliderWrapper) forceSliderWrapper.style.display = 'block';
-                    
-                    const isAutoUnmanaged = document.getElementById('auto_unmanaged_current').checked;
-                    if (autoSliderWrapper) autoSliderWrapper.style.display = isAutoUnmanaged ? 'none' : 'block';
-                    
+                    if (autoSliderWrapper) autoSliderWrapper.style.display = 'block';
+                } else {
+                    if (forceSliderWrapper) forceSliderWrapper.style.display = 'block';
+                    if (autoSliderWrapper) autoSliderWrapper.style.display = 'block';
                     if (forceApplyContainer) forceApplyContainer.style.display = 'none';
                     if (autoApplyContainer) autoApplyContainer.style.display = 'none';
                 }
@@ -2915,13 +2806,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
                 }
 
-                // Konfiguráció kitöltése a szerver adataival (csak az első alkalommal).
-                // Védőháló: ha a data nyilvánvalóan nem valós/teljes konfiguráció (pl. egy
-                // visszafejtés nélkül átcsúszott, még titkosított csomag számai lennének itt),
-                // NEM állítjuk configLoaded-et igazra -- a következő sikeres lekérdezés így
-                // még mindig megpróbálhatja helyesen feltölteni a felületet, ahelyett hogy
-                // egy hibás/üres állapot örökre beragadna.
-                if (!configLoaded && typeof data.charger_max_amps === 'number' && typeof data.control_mode === 'string') {
+                // Konfiguráció kitöltése a szerver adataival (csak az első alkalommal)
+                if (!configLoaded) {
                     document.getElementById('auto_start_soc').value = data.start_soc;
                     document.getElementById('auto_stop_soc').value = data.stop_soc || 0;
                     updateInputStatus('auto_stop_soc');
@@ -2936,22 +2822,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     document.getElementById('auto_persist_mode_on_restart').checked = data.persist_mode_on_restart;
                     
                     originalAutoAmps = data.charger_max_amps;
-                    document.getElementById('auto_charger_max_amps').value = data.charger_max_amps > 0 ? data.charger_max_amps : 16;
-                    document.getElementById('auto-amps-val').innerText = data.charger_max_amps > 0 ? data.charger_max_amps : 'Nem felügyelt (0A)';
-                    document.getElementById('auto_unmanaged_current').checked = data.charger_max_amps === 0;
-                    if (data.charger_max_amps === 0) {
-                        document.getElementById('auto_charger_max_amps').disabled = true;
-                        if (autoSliderWrapper) autoSliderWrapper.style.display = 'none';
-                    }
-                    
+                    document.getElementById('auto_charger_max_amps').value = data.charger_max_amps;
+                    document.getElementById('auto-amps-val').innerText = data.charger_max_amps;
+
                     originalForceAmps = data.charger_max_amps;
-                    document.getElementById('force_charger_max_amps').value = data.charger_max_amps > 0 ? data.charger_max_amps : 16;
-                    document.getElementById('force-amps-val').innerText = data.charger_max_amps > 0 ? data.charger_max_amps : 'Nem felügyelt (0A)';
-                    document.getElementById('force_unmanaged_current').checked = data.charger_max_amps === 0;
-                    if (data.charger_max_amps === 0) {
-                        document.getElementById('force_charger_max_amps').disabled = true;
-                        if (forceSliderWrapper && isCharging) forceSliderWrapper.style.display = 'none';
-                    }
+                    document.getElementById('force_charger_max_amps').value = data.charger_max_amps;
+                    document.getElementById('force-amps-val').innerText = data.charger_max_amps;
 
                     // Összes meglévő csúszka háttér kitöltésének beállítása (pl. töltőáram csúszka)
                     document.querySelectorAll('input[type="range"]').forEach(updateSliderBackground);
@@ -3158,18 +3034,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         async function saveAutoConfig(event) {
             event.preventDefault();
-            const start_soc = parseInt(document.getElementById('auto_start_soc').value) || 100;
-            const stop_soc = parseInt(document.getElementById('auto_stop_soc').value) || 0;
-            const stop_import_limit = parseInt(document.getElementById('auto_stop_import_limit').value) || 0;
-            const grid_charge_duration_minutes = parseInt(document.getElementById('auto_grid_charge_duration_minutes').value) || 0;
-            const house_power_limit_w = parseInt(document.getElementById('auto_house_power_limit_w').value) || 0;
+            const start_soc = parseInt(document.getElementById('auto_start_soc').value);
+            const stop_soc = parseInt(document.getElementById('auto_stop_soc').value);
+            const stop_import_limit = parseInt(document.getElementById('auto_stop_import_limit').value);
+            const grid_charge_duration_minutes = parseInt(document.getElementById('auto_grid_charge_duration_minutes').value);
+            const house_power_limit_w = parseInt(document.getElementById('auto_house_power_limit_w').value);
             const persist_mode_on_restart = document.getElementById('auto_persist_mode_on_restart').checked;
-            const charger_max_amps = document.getElementById('auto_unmanaged_current').checked ? 0 : parseInt(document.getElementById('auto_charger_max_amps').value);
-
-            if (start_soc < stop_soc) {
-                alert("Hiba: A Start % (" + start_soc + "%) nem lehet kisebb a Leállítási küszöbnél (" + stop_soc + "%)!");
-                return;
-            }
+            const charger_max_amps = parseInt(document.getElementById('auto_charger_max_amps').value);
 
             try {
                 const response = await fetch('/api/config', {
@@ -3192,10 +3063,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 });
                 const result = await response.json();
                 alert(result.message);
-                originalAutoAmps = charger_max_amps;
-                document.getElementById('auto-apply-container').style.display = 'none';
+                if (result.status === 'success') {
+                    originalAutoAmps = charger_max_amps;
+                    document.getElementById('auto-apply-container').style.display = 'none';
+                } else {
+                    await updateStatus();
+                }
             } catch (error) {
                 alert("Sikertelen mentés: " + error);
+                await updateStatus();
             }
         }
 
@@ -3583,42 +3459,54 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
         elif self.path == '/api/config':
             try:
                 config_data = self._read_encrypted_body()
-                with state_lock:
-                    if "start_soc" in config_data:
-                        shared_state["start_soc"] = int(config_data["start_soc"])
-                    if "stop_soc" in config_data:
-                        shared_state["stop_soc"] = int(config_data["stop_soc"])
-                        
-                    # Biztonsági ellenőrzés: start_soc nem lehet kisebb, mint stop_soc
-                    if shared_state.get("start_soc", 100) < shared_state.get("stop_soc", 0):
-                        self._send_encrypted_json({"status": "error", "message": "Hiba: A Start % nem lehet kisebb a Stop %-nál!"})
+
+                # Validáció ELŐBB, alkalmazás ELŐTT — atomi: vagy minden érvényes, vagy semmi sem változik
+                numeric_fields = ["start_soc", "stop_soc", "stop_import_limit",
+                                  "grid_charge_duration_minutes", "house_power_limit_w", "charger_max_amps"]
+                validated = {}
+                for field in numeric_fields:
+                    if field in config_data:
+                        raw = config_data[field]
+                        if raw is None:
+                            load_config()
+                            self._send_encrypted_json({"status": "error", "message": "Hibás adattartalom miatt visszaállt a konfig az eredetire"})
+                            return
+                        validated[field] = int(raw)
+
+                if "charger_max_amps" in validated:
+                    amps_val = validated["charger_max_amps"]
+                    if not (6 <= amps_val <= 16):
+                        load_config()
+                        self._send_encrypted_json({"status": "error", "message": f"Érvénytelen áramerősség: {amps_val}A (megengedett: 6-16A)"})
                         return
-                    if "stop_import_limit" in config_data:
-                        shared_state["stop_import_limit"] = int(config_data["stop_import_limit"])
-                    if "grid_charge_duration_minutes" in config_data:
-                        shared_state["grid_charge_duration_minutes"] = int(config_data["grid_charge_duration_minutes"])
-                    if "house_power_limit_w" in config_data:
-                        shared_state["house_power_limit_w"] = int(config_data["house_power_limit_w"])
+
+                new_start = validated.get("start_soc", shared_state.get("start_soc"))
+                new_stop = validated.get("stop_soc", shared_state.get("stop_soc"))
+                if new_start is not None and new_stop is not None and new_start < new_stop:
+                    load_config()
+                    self._send_encrypted_json({"status": "error", "message": f"Hiba: A Start % ({new_start}%) nem lehet kisebb a Stop %-nál ({new_stop}%)!"})
+                    return
+
+                if "forced_schedule" in config_data:
+                    try:
+                        validated_schedule = validate_forced_schedule(config_data["forced_schedule"])
+                    except ValueError as ve:
+                        load_config()
+                        self._send_encrypted_json({"status": "error", "message": f"Hiba az ütemezésben: {ve}"})
+                        return
+                else:
+                    validated_schedule = None
+
+                # Minden validáció átment — atomi alkalmazás
+                with state_lock:
+                    for field, val in validated.items():
+                        shared_state[field] = val
                     if "persist_mode_on_restart" in config_data:
                         shared_state["persist_mode_on_restart"] = bool(config_data["persist_mode_on_restart"])
-                    if "charger_max_amps" in config_data:
-                        # Validáció: 0 = "nem felügyelt" (érvényes), egyébként csak 6-16A fogadható el.
-                        # A /api/set_current végpont eddig is validált, de ez a végpont (amit a
-                        # csúszkák ténylegesen használnak) korábban ellenőrzés nélkül elfogadott
-                        # bármilyen egész értéket.
-                        amps_val = int(config_data["charger_max_amps"])
-                        if amps_val != 0 and not (6 <= amps_val <= 16):
-                            self._send_encrypted_json({"status": "error", "message": f"Érvénytelen áramerősség: {amps_val}A (megengedett: 0 vagy 6-16A)"})
-                            return
-                        shared_state["charger_max_amps"] = amps_val
                     if "force_submode" in config_data:
                         shared_state["force_submode"] = config_data["force_submode"]
-                    if "forced_schedule" in config_data:
-                        try:
-                            shared_state["forced_schedule"] = validate_forced_schedule(config_data["forced_schedule"])
-                        except ValueError as ve:
-                            self._send_encrypted_json({"status": "error", "message": f"Hiba az ütemezésben: {ve}"})
-                            return
+                    if validated_schedule is not None:
+                        shared_state["forced_schedule"] = validated_schedule
                     if "schedule_solar_auto" in config_data:
                         shared_state["schedule_solar_auto"] = bool(config_data["schedule_solar_auto"])
                     if "auto_enabled" in config_data:
@@ -3631,21 +3519,18 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                         if new_sched and not shared_state.get("schedule_enabled", False):
                             shared_state["force_submode"] = "schedule"
                         shared_state["schedule_enabled"] = new_sched
-                    
-                    # Alkalmazási és újraindítási flagek
                     if config_data.get("apply_with_stop"):
                         shared_state["apply_with_stop"] = True
                     if config_data.get("apply_with_restart"):
                         shared_state["apply_with_restart"] = True
                     if config_data.get("reset_limit"):
                         shared_state["reset_limit"] = True
-                
+
                 save_config_file()
                 log_message("Új konfigurációs paraméterek elmentve.")
-                
                 self._send_encrypted_json({"status": "success", "message": "Beállítások sikeresen mentve!"})
             except Exception as e:
-                self.send_error(400, f"Hibás adatformátum: {e}")
+                self._send_encrypted_json({"status": "error", "message": f"Hibás adatformátum: {e}"})
                 
         elif self.path == '/api/mode':
             try:

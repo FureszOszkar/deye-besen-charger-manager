@@ -920,7 +920,7 @@ async def run_charge_controller():
         # 1. Kényszerített (Force Charge) Mód
         if mode == "force":
             if manual_start_requested:
-                start_amps = 16 if charger_max_amps == 0 else charger_max_amps
+                start_amps = charger_max_amps
                 log_message(f"[VEZÉRLÉS] Kényszerített kézi töltés indítása ({start_amps}A)...")
                 start_payload = bytearray(47)
                 start_payload[0] = line_id
@@ -980,7 +980,7 @@ async def run_charge_controller():
         # 2. Ütemezett időablak fix áramkorláttal (Prioritás BE)
         elif mode == "schedule" and in_interval and override_auto:
             if not charging_active and last_sent_action != "START":
-                start_amps = 16 if target_amps == 0 else target_amps
+                start_amps = target_amps
                 log_message(f"[VEZÉRLÉS] Ütemezési időablak aktív (Prioritás BE). Töltés indítása ({start_amps}A)...")
                 start_payload = bytearray(47)
                 start_payload[0] = line_id
@@ -1038,7 +1038,7 @@ async def run_charge_controller():
             # --- INDÍTÁSI FELTÉTEL ---
             if not charging_active and last_sent_action != "START":
                 if battery_soc >= start_soc:
-                    start_amps = 16 if charger_max_amps == 0 else charger_max_amps
+                    start_amps = charger_max_amps
                     log_message(
                         f"[VEZÉRLÉS] Solar Auto feltételek teljesültek (Akku SoC: {battery_soc}% >= {start_soc}%). Töltés INDÍTÁSA ({start_amps}A)...")
 
