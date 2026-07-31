@@ -240,6 +240,10 @@ Biztonsági javítások — az eredeti incidens gyökérokait szünteti meg, aho
 
 *   **`dashboard.py` — `/api/config` atomi validáció:** Lásd a 6.2 szakasz frissített leírását. A korábbi szekvenciális, mezőnkénti alkalmazás helyett az összes numerikus mező egyszerre validálódik és alkalmaz, `load_config()`-alapú visszaállítással hibánál.
 
+### 2026-07-31
+
+*   **`dashboard.py` — csendes E2EE visszafejtési hiba javítása (kényszerített újra-bejelentkeztetés):** Mobilon előfordult, hogy egy korábban megnyitott lap újranyitásakor (böngésző bezárása/újranyitása után, feltehetően mobil bfcache/tab-freeze miatt) a dashboard nem kért új bejelentkezést, és elavult/hiányos adatokat mutatott (pl. a töltőáram csúszka a HTML-be égetett `16`-os alapértéken ragadt). Gyökérok: a kliens oldali `window.fetch` felülírásban, ha a `_pskDecrypt()` MAC-ellenőrzése hibázott (mert a lap JS-állapota — köztük az elavult session-kulcs — befagyasztva élte túl a bezárást, miközben a szerver közben újraindult / új session-kulcsot generált), a `catch` ág **csendben elnyelte a hibát**, és az eredeti, még titkosított JSON blobot adta vissza a hívónak a valódi adat helyett. Ez a `updateStatus()`-ban ahhoz vezetett, hogy a numerikus mezők mind `undefined` értéket kaptak, amit a DOM-frissítő kód (`.value = data.charger_max_amps`) csendben eldobott egy `range` inputon — nem volt hibaüzenet, nem volt kikényszerített újra-bejelentkeztetés. A `catch` ág mostantól — a `401 Unauthorized` ághoz hasonlóan — törli a helyi session-kulcsot (`sessionStorage`) és kikényszeríti az oldal újratöltését, ha bármilyen visszafejtési/MAC-hiba történik. Ez biztosítja, hogy elavult vagy hiányos adat sosem jelenhet meg csendben, és gyakoribb re-authentikációt is kikényszerít biztonsági szempontból.
+
 ---
 
 ## 8. Android Widget (`AndroidWidget/`)

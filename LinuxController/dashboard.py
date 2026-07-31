@@ -2058,7 +2058,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         });
                     }
                 } catch (e) {
-                    // Nem JSON vagy nem titkosított válasz: eredeti response visszaadása
+                    // Visszafejtés sikertelen (pl. elavult sessionKey egy befagyasztott/bfcache-elt
+                    // lapon a szerver újraindulása után) — biztonsági okból kényszerített
+                    // újra-bejelentkeztetés, hogy elavult/hiányos adat sose jelenjen meg csendben.
+                    sessionStorage.removeItem('_psk_key_hex');
+                    sessionStorage.removeItem('_psk_nonce');
+                    window.location.reload();
+                    return response;
                 }
             }
 

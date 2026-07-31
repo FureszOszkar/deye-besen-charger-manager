@@ -271,7 +271,13 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 
 ---
 
-## 7. Recent Fixes and Hardening (2026-07-29)
+## 7. Recent Fixes and Hardening
+
+### 2026-07-31
+
+* **`dashboard.py` — silent E2EE decryption failure fixed (forced re-login):** On mobile, reopening a previously loaded page (after closing/reopening the browser, likely due to mobile bfcache/tab-freeze behavior) sometimes skipped the login prompt and showed stale/incomplete data — e.g. the charger-amps slider stuck at the hardcoded `16` HTML default. Root cause: in the client-side `window.fetch` override, if `_pskDecrypt()`'s MAC check failed (because the page's frozen JS state — including a stale session key — survived the closure while the server had since restarted / issued a new session key), the `catch` block **silently swallowed the error** and returned the original, still-encrypted JSON blob to the caller instead of the real data. In `updateStatus()`, this made every numeric field `undefined`, which the DOM-update code (`.value = data.charger_max_amps`) silently dropped on a `range` input — no error message, no forced re-login. The `catch` block now mirrors the `401 Unauthorized` branch: it clears the local session key (`sessionStorage`) and forces a page reload on any decryption/MAC failure. This guarantees stale or incomplete data can never render silently, and also forces more frequent re-authentication as a security side benefit.
+
+### 2026-07-29
 
 * **`config.py` — hardcoded numeric defaults removed:** The six control-critical fields (`start_soc`, `stop_soc`, `stop_import_limit`, `grid_charge_duration_minutes`, `house_power_limit_w`, `charger_max_amps`) in both `DEFAULT_CONFIG` and the `shared_state` initializer now default to `None` instead of plausible-looking numbers. `load_config()` is now `None`-tolerant: it only calls `int()` on a field if the loaded value is not `None`. If `config.json` is missing, these fields remain `None`; any comparison in `charging_logic.py` will then raise `TypeError`, which the `main.py` watchdog catches and handles by restarting the task — charging never starts with fabricated values.
 * **`charging_logic.py` — `0 → 16A` conversion removed:** Three occurrences of `start_amps = 16 if charger_max_amps == 0 else charger_max_amps` (and one for `target_amps`) deleted. The old dual meaning of `charger_max_amps == 0` ("unmanaged" vs. missing/corrupt data) is eliminated; `charger_max_amps` is now always a concrete 6-16A value enforced by the server-side validation.
@@ -279,7 +285,7 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 * **`dashboard.py` — `saveAutoConfig` empty-field coercions removed:** The `|| 100` and `|| 0` fallback coercions on five numeric fields have been removed. An empty input now sends `null` to the server (via `parseInt("") === NaN` → `JSON.stringify(NaN) === null`), which the server's atomic validator rejects. On error, the client shows the server's message and calls `updateStatus()` to repopulate the form with the last saved values.
 * **`dashboard.py` — `/api/config` atomic validation:** See the updated Section 6.2. The original sequential field-by-field mutation replaced with a validate-first, apply-atomically model with `load_config()`-based rollback on any invalid input.
 
-## 8. Recent Fixes and Hardening (2026-07-08)
+### 2026-07-08
 
 A review pass found and fixed the following issues. Summarized here since they affect behavior described elsewhere in this document:
 
@@ -295,6 +301,7 @@ A review pass found and fixed the following issues. Summarized here since they a
 ---
 
 ## 8. Android Widget (`AndroidWidget/`)
+
 
 The project includes a standalone native Android app (Kotlin) that shows the system's live telemetry through a home-screen widget. It builds as its own APK: the GitHub Actions workflow (`.github/workflows/android_widget_build.yml`) runs `assembleDebug` on every push touching `AndroidWidget/**` and uploads the APK as an artifact.
 
