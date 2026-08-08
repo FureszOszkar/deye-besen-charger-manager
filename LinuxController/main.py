@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import threading
 
@@ -125,6 +126,23 @@ async def main():
                     log_message(f"[WATCHDOG CRITICAL] A(z) {task_name} feladat a cancel() után 30 másodperccel sem állt le! Ismételt megszakítási kísérlet...")
                     task.cancel()
                     cancel_pending[task_name] = current_time
+
+        # 3. Webszerver szál felügyelete: crash (is_alive) ÉS befagyás (PONG), ugyanúgy mint a többi taszknál.
+        # A web_thread nem asyncio Task, ezért nincs task.cancel() megfelelője -- egy ténylegesen
+        # befagyott (de él, csak nem pörgő) natív szálat Python nem tud biztonságosan kívülről
+        # megszakítani, ezért befagyás esetén a teljes folyamatot állítjuk le, hogy a systemd
+        # (Restart=on-failure) tisztán újraindítsa.
+        if not web_thread.is_alive():
+            log_message("[WATCHDOG CRITICAL] A webszerver szál (dashboard) nem fut! Újraindítás...")
+            web_thread = threading.Thread(target=start_web_server, daemon=True)
+            web_thread.start()
+            with state_lock:
+                shared_state["task_pong"]["web"] = current_time
+        else:
+            last_web_pong = pongs.get("web", current_time)
+            if current_time - last_web_pong > 30:
+                log_message("[WATCHDOG CRITICAL] Befagyás: A webszerver szál 30 másodperce nem küldött PONG jelet! Natív szálat Python nem tud biztonságosan kívülről megszakítani -- a teljes folyamat kényszerített leállítása, hogy a systemd (Restart=on-failure) tisztán újraindítsa.")
+                os._exit(1)
 
 
 def run_program():

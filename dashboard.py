@@ -369,15 +369,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             display: none;
         }
 
-        html, body {
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        body {
             margin: 0;
             padding: 0;
             width: 100%;
             max-width: 100%;
             overflow-x: hidden;
-        }
-
-        body {
             background-color: var(--bg-color);
             background-image: url('/background.png');
             background-attachment: fixed;
@@ -579,82 +583,56 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             box-shadow: 0 0 8px #22d3ee;
         }
 
-        /* Hamburger gomb */
-        .hamburger-btn {
+        /* Mobil fejléc kijelentkezés ikon (a korábbi hamburger gomb helyén) */
+        .mobile-logout-btn {
             display: none;
             background: transparent;
             border: none;
-            color: var(--text-color);
-            font-size: 1.6rem;
+            color: var(--danger);
             cursor: pointer;
-            padding: 0.2rem 0.5rem;
+            padding: 0.3rem;
             z-index: 110;
             outline: none;
+            align-items: center;
+            justify-content: center;
         }
 
-        /* Mobil menü overlay */
-        .mobile-menu-overlay {
+        /* Jobb oldali ikondokk (mobil navigáció) */
+        .mobile-dock {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(11, 15, 25, 0.97);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            z-index: 105;
+            right: 0;
+            bottom: 12vh;
             flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 1.2rem;
-            padding: 2rem;
-            transition: opacity 0.25s ease;
-            opacity: 0;
-            pointer-events: none;
+            gap: 0.6rem;
+            background: rgba(15, 23, 42, 0.55);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 16px 0 0 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-right: none;
+            padding: 0.6rem 0.5rem;
+            padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
+            z-index: 110;
         }
 
-        .mobile-menu-overlay.open {
+        .dock-item {
             display: flex;
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .menu-item {
-            font-size: 1.35rem;
-            font-weight: 600;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            background: transparent;
+            border: none;
             color: var(--text-muted);
             cursor: pointer;
-            transition: all 0.2s;
-            padding: 0.6rem 1.5rem;
-            border-radius: 8px;
-            width: 80%;
-            max-width: 300px;
-            text-align: center;
-            border: 1px solid transparent;
+            padding: 0;
+            outline: none;
+            transition: color 0.2s;
         }
 
-        .menu-item:hover, .menu-item.active {
+        .dock-item.active {
             color: var(--primary);
-            background: rgba(56, 189, 248, 0.08);
-            border-color: rgba(56, 189, 248, 0.2);
-        }
-
-        .menu-item.logout-item {
-            color: var(--danger);
-            margin-top: 1rem;
-        }
-
-        .menu-item.logout-item:hover {
-            background: rgba(239, 68, 68, 0.08);
-            border-color: rgba(239, 68, 68, 0.2);
-        }
-
-        .menu-divider {
-            width: 50%;
-            height: 1px;
-            background: var(--border-color);
-            margin: 0.5rem 0;
         }
 
         .card {
@@ -1261,6 +1239,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 max-width: none !important;
                 padding: 0.5rem 0.3rem !important;
             }
+            .phase-table {
+                table-layout: fixed !important;
+            }
             #charging-power-val {
                 font-size: 1.4rem !important;
             }
@@ -1289,8 +1270,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             .header-status-container {
                 display: none !important;
             }
-            .hamburger-btn {
-                display: block !important;
+            .mobile-logout-btn {
+                display: flex;
+            }
+            .mobile-dock {
+                display: flex !important;
             }
             .status-bar-mobile {
                 display: flex !important;
@@ -1300,8 +1284,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 min-height: auto;
             }
             .mode-selector {
-                /* Elrejtjük a kártyán belüli tabválasztót mobilon, mert a hamburger menü vezérli */
+                /* Elrejtjük a kártyán belüli tabválasztót mobilon, mert a jobb oldali ikondokk vezérli */
                 display: none !important;
+            }
+            #config-force {
+                min-height: calc(100dvh - 210px);
+                padding-right: 3.2rem;
+            }
+            #config-force .manual-controls-heading {
+                margin-top: auto !important;
             }
             .config-form {
                 grid-template-columns: 1fr !important;
@@ -1372,7 +1363,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             #config-auto .tooltip-text,
             #config-schedule .tooltip-text,
             #config-force .tooltip-text,
-            .metric-grid > div:nth-child(even) .tooltip-text {
+            .metric-grid > div:nth-child(even) .tooltip-text,
+            .telemetry-status-rows > div > div:last-child .tooltip-text {
                 left: auto !important;
                 right: -10px !important;
                 transform: translateY(2px) !important;
@@ -1380,7 +1372,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             #config-auto .tooltip-text::after,
             #config-schedule .tooltip-text::after,
             #config-force .tooltip-text::after,
-            .metric-grid > div:nth-child(even) .tooltip-text::after {
+            .metric-grid > div:nth-child(even) .tooltip-text::after,
+            .telemetry-status-rows > div > div:last-child .tooltip-text::after {
                 left: auto !important;
                 right: 15px !important;
                 margin-left: 0 !important;
@@ -1395,7 +1388,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <h1>Deye & BESEN</h1>
             <p>Helyi Napelemes Töltésvezérlő és Felügyelet</p>
         </div>
-        <button class="hamburger-btn" id="hamburger-btn" onclick="toggleMobileMenu()">☰</button>
+        <button class="mobile-logout-btn" id="mobile-logout-btn" onclick="logout()" style="display:none;" title="Kijelentkezés">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        </button>
         <div class="header-status-container">
             <div class="status-group">
                 <span class="status-group-label">Kapcsolatok:</span>
@@ -1463,15 +1458,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Mobil navigációs menü overlay -->
-    <div id="mobile-menu" class="mobile-menu-overlay">
-        <div class="menu-item active" id="menu-item-auto" onclick="showSection('auto')">Auto Solar</div>
-        <div class="menu-item" id="menu-item-schedule" onclick="showSection('schedule')">Ütemezett</div>
-        <div class="menu-item" id="menu-item-force" onclick="showSection('force')">Kézi mód</div>
-        <div class="menu-item" id="menu-item-measurements" onclick="showSection('measurements')">Mérések</div>
-        <div class="menu-item" id="menu-item-log" onclick="showSection('log')">Napló</div>
-        <div class="menu-divider"></div>
-        <div class="menu-item logout-item" id="mobile-menu-logout" style="display: none;" onclick="logout()">Kijelentkezés</div>
+    <!-- Mobil jobb oldali ikondokk (navigáció) -->
+    <div id="mobile-dock" class="mobile-dock">
+        <button class="dock-item active" id="dock-item-auto" onclick="showSection('auto')" title="Auto Solar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+        </button>
+        <button class="dock-item" id="dock-item-schedule" onclick="showSection('schedule')" title="Ütemezett">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        </button>
+        <button class="dock-item" id="dock-item-force" onclick="showSection('force')" title="Kézi mód">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+        </button>
+        <button class="dock-item" id="dock-item-measurements" onclick="showSection('measurements')" title="Mérések">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+        </button>
+        <button class="dock-item" id="dock-item-log" onclick="showSection('log')" title="Napló">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
+        </button>
     </div>
 
     <main>
@@ -1613,7 +1616,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <button type="button" class="action-btn action-btn-start" style="padding:0.5rem; font-size:0.8rem; background:linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); width: 100%;" onclick="applyForceAmpsWithRestart()">Alkalmaz újraindítással</button>
                         </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; margin-bottom: 0.3rem;">
+                    <div class="manual-controls-heading" style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; margin-bottom: 0.3rem;">
                         <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-color);">Kézi vezérlés indítása:</span>
                         <span class="tooltip-container tooltip-align-left" style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
                             Kézi gombok működése ⓘ
@@ -1790,7 +1793,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         </table>
                     </div>
                 </div>
-                <div style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted);">
+                <div class="telemetry-status-rows" style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted);">
                     <div style="display: flex; justify-content: space-between;">
                         <div>
                             <span class="hide-mobile">Töltési energia összesen</span><span class="show-mobile">Összes energia</span>:
@@ -2478,15 +2481,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Kijelentkezés gomb láthatóságának kezelése
                 const logoutDiv = document.getElementById('logout-divider');
                 const logoutGrp = document.getElementById('logout-group');
-                const mobLogout = document.getElementById('mobile-menu-logout');
+                const mobLogoutBtn = document.getElementById('mobile-logout-btn');
                 if (data.web_auth_enabled) {
                     logoutDiv.style.display = 'block';
                     logoutGrp.style.display = 'inline-flex';
-                    if (mobLogout) mobLogout.style.display = 'block';
+                    if (mobLogoutBtn) mobLogoutBtn.style.display = '';
                 } else {
                     logoutDiv.style.display = 'none';
                     logoutGrp.style.display = 'none';
-                    if (mobLogout) mobLogout.style.display = 'none';
+                    if (mobLogoutBtn) mobLogoutBtn.style.display = 'none';
                 }
 
                 // Inverter kapcsolat
@@ -2936,25 +2939,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('config-force').style.display = activeTab === 'force' ? 'flex' : 'none';
         }
 
-        function toggleMobileMenu() {
-            const menu = document.getElementById('mobile-menu');
-            const btn = document.getElementById('hamburger-btn');
-            if (menu.classList.contains('open')) {
-                menu.classList.remove('open');
-                btn.innerText = '☰';
-            } else {
-                menu.classList.add('open');
-                btn.innerText = '✕';
-            }
-        }
-
         function showSection(section) {
             currentSection = section;
-            
-            // Hamburger menü kijelölés frissítése
-            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
-            const activeMenuItem = document.getElementById('menu-item-' + section);
-            if (activeMenuItem) activeMenuItem.classList.add('active');
+
+            // Ikondokk kijelölés frissítése
+            document.querySelectorAll('.dock-item').forEach(el => el.classList.remove('active'));
+            const activeDockItem = document.getElementById('dock-item-' + section);
+            if (activeDockItem) activeDockItem.classList.add('active');
             
             const isMobile = window.innerWidth <= 1024;
             
@@ -2980,12 +2971,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 } else if (section === 'log') {
                     if (logCard) logCard.style.display = 'block';
                 }
-                
-                // Menü bezárása
-                const menu = document.getElementById('mobile-menu');
-                if (menu) menu.classList.remove('open');
-                const btn = document.getElementById('hamburger-btn');
-                if (btn) btn.innerText = '☰';
             } else {
                 // Asztali nézetben mindent visszaállítunk a megszokott grid elrendezésre
                 if (configCard) configCard.style.display = 'flex';
@@ -3250,6 +3235,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 # --- HTTP KEZELŐ OSZTÁLY ---
 
 class ControllerHTTPHandler(BaseHTTPRequestHandler):
+
+    request_timeout = 30  # másodperc — véd a beragadt (pl. elaltatott mobilrádiójú) kliensek ellen
+
+    def setup(self):
+        self.request.settimeout(self.request_timeout)
+        super().setup()
 
     def log_message(self, format, *args):
         pass
@@ -3661,8 +3652,17 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
 
 # --- WEBSZERVER INDÍTÁS ---
 
+class ControllerHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def service_actions(self):
+        # A serve_forever() minden ciklusában (alapból ~0.5 mp-enként) meghívja,
+        # függetlenül attól, jött-e éppen kliens-kérés — ez a Watchdog "web" PONG jele.
+        with state_lock:
+            shared_state["task_pong"]["web"] = time.time()
+
 def start_web_server():
     server_address = ('0.0.0.0', HTTP_PORT)
-    httpd = ThreadingHTTPServer(server_address, ControllerHTTPHandler)
+    httpd = ControllerHTTPServer(server_address, ControllerHTTPHandler)
     log_message(f"Web Dashboard elindítva, elérhető a helyi hálózaton a {HTTP_PORT}-as porton.")
     httpd.serve_forever()

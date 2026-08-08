@@ -66,7 +66,7 @@ DEFAULT_PACKET_PASSWORD = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 # --- SHARED STATE (globális állapot) ---
 shared_state = {
     # Watchdog PONG jelek
-    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time()},
+    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time()},
 
     # Kapcsolatok állapota
     "inverter_connected": False,
