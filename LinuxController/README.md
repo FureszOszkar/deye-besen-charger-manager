@@ -62,13 +62,13 @@ Ha a `systemctl status` `inactive (dead)`-et mutat, a `journalctl -n 80` kimenet
 
 A program a `config.json`-t a **futtatáskori munkakönyvtárhoz relatívan** olvassa/írja, ezért mindig **ebből a mappából** kell indítani (`python main.py` a mappán belülről) — systemd service esetén ezt a `WorkingDirectory=` beállítás garantálja, amit az `install_linux.sh` automatikusan a helyes útvonalra állít be.
 
-A `config.json` **nem jön létre automatikusan indításkor** — ez korábban tévesen volt dokumentálva. A program hiányában csak memóriában használ beépített alapértékeket (`DEFAULT_CONFIG`), fájlt csak akkor ír, ha ténylegesen történik mentés (pl. a dashboard beállítás-mentésekor, vagy egy töltési munkamenet lezárásakor) — indításkor önmagában nem.
+A `config.json` **nem jön létre automatikusan indításkor**. A program hiányában csak memóriában használ beépített alapértékeket (`DEFAULT_CONFIG`), fájlt csak akkor ír, ha ténylegesen történik mentés (pl. a dashboard beállítás-mentésekor, vagy egy töltési munkamenet lezárásakor) — indításkor önmagában nem.
 
 **Ráadásul a webes felület nem tudja beállítani** az `inverter_ip`, `charger_mac`, `logger_serial` mezőket (csak SOC-határokat, ütemezést, teljesítmény-limiteket) — ezek **kizárólag** a `config.json`-ból tölthetők be. Enélkül a program a beépített placeholder-adatokkal (`192.168.0.100`, `00:11:22:33:44:55`) próbál kapcsolódni, ami nem fog sikerülni.
 
 **Ezért a `config.json` biztosítása nem opcionális, hanem szükséges** a valós hardverhez. Két lehetőség:
-1.  **Másold ide a mellékelt [`config_example.json`](config_example.json) fájlt** `config.json` néven, és írd bele a saját inverter IP-det, sorozatszámodat, a töltő nevét/MAC-címét és jelszavát.
-2.  **Vagy másold át a meglévő (pl. Windows-oldali) `config.json`-odat** ide, ha már van egy működő beállításod.
+1.  **Másold a mellékelt [`config_example.json`](config_example.json) fájlt ebbe a mappába** (a `LinuxController` mappa gyökerébe, a `main.py` mellé) `config.json` néven, és írd bele a saját inverter IP-det, sorozatszámodat, a töltő nevét/MAC-címét és jelszavát.
+2.  **Vagy másold át a meglévő (pl. Windows-oldali) `config.json`-odat** ugyanebbe a mappába, ha már van egy működő beállításod.
 
 ## Automatikus indítás systemd szolgáltatásként
 
@@ -102,7 +102,7 @@ A README fő fájlja a **Mercusys MA550H Long Range Bluetooth 5.4** adaptert aj�
 
 ### Ellenőrzés: szükséges-e még a manuális javítás?
 
-**FIGYELEM — a `modinfo btusb | grep 2c4e` NEM alkalmas ellenőrzés:** a Realtek-eszköztábla bejegyzései nem kerülnek be a modul alias-listájába, így ez a parancs a *helyesen patchelt* modulon is üres kimenetet ad. (Ez a dokumentáció korábban tévesen ezt javasolta.)
+**FIGYELEM — a `modinfo btusb | grep 2c4e` NEM alkalmas ellenőrzés:** a Realtek-eszköztábla bejegyzései nem kerülnek be a modul alias-listájába, így ez a parancs a *helyesen patchelt* modulon is üres kimenetet ad.
 
 A megbízható ellenőrzés a **futás közbeni viselkedés**: csatlakoztatott adapter mellett nézd meg a kernel-naplót:
 
