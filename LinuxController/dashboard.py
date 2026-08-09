@@ -1364,7 +1364,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             #config-schedule .tooltip-text,
             #config-force .tooltip-text,
             .metric-grid > div:nth-child(even) .tooltip-text,
-            .telemetry-status-rows > div > div:last-child .tooltip-text {
+            .telemetry-status-rows > div > div:last-child .tooltip-text,
+            #active-charging-view > div:last-child .tooltip-text {
                 left: auto !important;
                 right: -10px !important;
                 transform: translateY(2px) !important;
@@ -1373,7 +1374,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             #config-schedule .tooltip-text::after,
             #config-force .tooltip-text::after,
             .metric-grid > div:nth-child(even) .tooltip-text::after,
-            .telemetry-status-rows > div > div:last-child .tooltip-text::after {
+            .telemetry-status-rows > div > div:last-child .tooltip-text::after,
+            #active-charging-view > div:last-child .tooltip-text::after {
                 left: auto !important;
                 right: 15px !important;
                 margin-left: 0 !important;
@@ -1460,7 +1462,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <!-- Mobil jobb oldali ikondokk (navigáció) -->
     <div id="mobile-dock" class="mobile-dock">
-        <button class="dock-item active" id="dock-item-auto" onclick="showSection('auto')" title="Auto Solar">
+        <button class="dock-item" id="dock-item-auto" onclick="showSection('auto')" title="Auto Solar">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
         </button>
         <button class="dock-item" id="dock-item-schedule" onclick="showSection('schedule')" title="Ütemezett">
@@ -1469,7 +1471,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <button class="dock-item" id="dock-item-force" onclick="showSection('force')" title="Kézi mód">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
         </button>
-        <button class="dock-item" id="dock-item-measurements" onclick="showSection('measurements')" title="Mérések">
+        <button class="dock-item active" id="dock-item-measurements" onclick="showSection('measurements')" title="Mérések">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
         </button>
         <button class="dock-item" id="dock-item-log" onclick="showSection('log')" title="Napló">
@@ -3224,7 +3226,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         });
 
-        showSection('auto');
+        showSection('measurements');
         setInterval(updateStatus, 2000);
         updateStatus();
     </script>
