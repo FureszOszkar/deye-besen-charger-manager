@@ -13,21 +13,39 @@ from Crypto.Util.Padding import pad, unpad
 
 from config import (
     shared_state, state_lock, log_message,
-    HTTP_PORT, DEFAULT_CONFIG, save_config_file,
+    HTTP_PORT, DEFAULT_CONFIG, save_config_file, load_config,
     WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
 )
 
 # --- ÜTEMEZÉS VALIDÁCIÓ ---
 FORCED_SCHEDULE_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
 _TIME_PATTERN = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+# A "stop" mező ezen felül a nap végét jelző "24:00" speciális értéket is elfogadja
+# (pl. egy "22:00"-"24:00" intervallum + a következő nap "00:00"-tól kezdődő intervalluma
+# együtt ad ki egy megszakítás nélküli éjszakai töltést -- lásd MAX_WINDOWS_PER_DAY alatt).
+_STOP_TIME_PATTERN = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$|^24:00$')
+MAX_WINDOWS_PER_DAY = 8
+
+
+def _schedule_time_to_minutes(t_str):
+    h, m = map(int, t_str.split(':'))
+    return h * 60 + m
 
 
 def validate_forced_schedule(schedule):
     """Ellenőrzi és normalizálja a kliensből érkező heti ütemezés listát.
     ValueError-t dob, ha a struktúra érvénytelen (rossz típus, hiányzó/duplikált nap,
-    hibás időformátum, tartományon kívüli áramerősség), hogy hibás adat sose kerülhessen
-    a shared_state-be vagy a config.json-be (ami újraindításkor a program összeomlását
-    és a dashboardon tárolt XSS-t is okozhat, ha nincs validálva)."""
+    hibás időformátum, tartományon kívüli áramerősség, napon belüli átfedő
+    időintervallumok), hogy hibás adat sose kerülhessen a shared_state-be vagy a
+    config.json-be (ami újraindításkor a program összeomlását és a dashboardon
+    tárolt XSS-t is okozhat, ha nincs validálva).
+
+    Minden nap egy VÁLTOZÓ SZÁMÚ, önálló időintervallumból ("windows") álló listát
+    tartalmaz. Minden intervallum egyetlen naptári napon belül van (start < stop,
+    a stop legfeljebb "24:00" lehet) -- nincs éjfélen átnyúló intervallum; az
+    éjszakai töltést a felhasználó két, egymást követő napi intervallummal állítja
+    be. Egy napon belül az intervallumok nem fedhetik át egymást, de érinthetik
+    (egyik vége = másik kezdete) -- ez a folytonos töltés normál módja."""
     if not isinstance(schedule, list) or len(schedule) != 7:
         raise ValueError("Az ütemezésnek pontosan 7 elemű listának kell lennie.")
 
@@ -44,27 +62,59 @@ def validate_forced_schedule(schedule):
             raise ValueError(f"Duplikált nap az ütemezésben: {day}")
         seen_days.add(day)
 
-        start = item.get("start")
-        stop = item.get("stop")
-        if not isinstance(start, str) or not _TIME_PATTERN.match(start):
-            raise ValueError(f"Érvénytelen kezdési időpont ({day}): {start!r}")
-        if not isinstance(stop, str) or not _TIME_PATTERN.match(stop):
-            raise ValueError(f"Érvénytelen befejezési időpont ({day}): {stop!r}")
+        enabled = bool(item.get("enabled", False))
+        windows_in = item.get("windows")
+        if not isinstance(windows_in, list):
+            raise ValueError(f"Az időintervallumok listája érvénytelen ({day}).")
+        if enabled and len(windows_in) == 0:
+            raise ValueError(f"Ha egy nap engedélyezve van, legalább egy időintervallumot meg kell adni ({day}).")
+        if len(windows_in) > MAX_WINDOWS_PER_DAY:
+            raise ValueError(f"Túl sok időintervallum ({day}): legfeljebb {MAX_WINDOWS_PER_DAY} engedélyezett.")
 
-        try:
-            amps = int(item.get("amps", 16))
-        except (TypeError, ValueError):
-            raise ValueError(f"Érvénytelen áramerősség érték ({day}): {item.get('amps')!r}")
-        if not (6 <= amps <= 16):
-            raise ValueError(f"Az áramerősség 6-16A között kell legyen ({day}): {amps}")
+        parsed_windows = []
+        for w in windows_in:
+            if not isinstance(w, dict):
+                raise ValueError(f"Az időintervallum objektum kell legyen ({day}).")
+
+            start = w.get("start")
+            stop = w.get("stop")
+            if not isinstance(start, str) or not _TIME_PATTERN.match(start):
+                raise ValueError(f"Érvénytelen kezdési időpont ({day}): {start!r}")
+            if not isinstance(stop, str) or not _STOP_TIME_PATTERN.match(stop):
+                raise ValueError(f"Érvénytelen befejezési időpont ({day}): {stop!r}")
+
+            start_m = _schedule_time_to_minutes(start)
+            stop_m = _schedule_time_to_minutes(stop)
+            if start_m >= stop_m:
+                raise ValueError(
+                    f"A kezdési időpontnak korábbinak kell lennie, mint a befejezési időpont ({day}): {start}-{stop}")
+
+            try:
+                amps = int(w.get("amps", 16))
+            except (TypeError, ValueError):
+                raise ValueError(f"Érvénytelen áramerősség érték ({day}): {w.get('amps')!r}")
+            if not (6 <= amps <= 16):
+                raise ValueError(f"Az áramerősség 6-16A között kell legyen ({day}): {amps}")
+
+            parsed_windows.append({
+                "start": start, "stop": stop, "amps": amps,
+                "override_auto": bool(w.get("override_auto", True)),
+                "start_m": start_m, "stop_m": stop_m,
+            })
+
+        # Napon belüli átfedés-ellenőrzés (érintkezés -- egyik vége = másik kezdete -- engedélyezett)
+        parsed_windows.sort(key=lambda pw: pw["start_m"])
+        for i in range(1, len(parsed_windows)):
+            if parsed_windows[i]["start_m"] < parsed_windows[i - 1]["stop_m"]:
+                raise ValueError(f"Az időintervallumok átfedésben vannak ({day}).")
 
         validated.append({
             "day": day,
-            "enabled": bool(item.get("enabled", False)),
-            "start": start,
-            "stop": stop,
-            "amps": amps,
-            "override_auto": bool(item.get("override_auto", True))
+            "enabled": enabled,
+            "windows": [
+                {"start": pw["start"], "stop": pw["stop"], "amps": pw["amps"], "override_auto": pw["override_auto"]}
+                for pw in parsed_windows
+            ],
         })
 
     if len(seen_days) != 7:
@@ -965,6 +1015,130 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-weight: 600;
         }
 
+        /* Napi-több-időintervallumos ütemezés: egy nap = egy csoport (fejléc + N időintervallum-sor) */
+        .schedule-day-group {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.4rem;
+            margin-bottom: 0.4rem;
+            background: rgba(15, 23, 42, 0.15);
+        }
+
+        .schedule-day-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.1rem 0.3rem 0.3rem;
+        }
+
+        .schedule-day-header .sched-day-label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            min-width: 65px;
+        }
+
+        .schedule-window-row {
+            display: grid;
+            grid-template-columns: 92px 92px 1fr 150px 26px;
+            align-items: center;
+            gap: 0.3rem;
+            background: rgba(15, 23, 42, 0.3);
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            margin-top: 0.3rem;
+        }
+
+        /* Saját HH:MM időbeviteli mező -- két számmező ':' elválasztóval, mert a natív
+           <input type="time"> nem tud "24:00"-t (nap vége) felvenni. */
+        .sched-time-group {
+            display: flex;
+            align-items: center;
+            gap: 0.15rem;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 0.15rem 0.3rem;
+        }
+
+        .sched-time-hh, .sched-time-mm {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 0.75rem;
+            text-align: center;
+            outline: none;
+            width: 26px;
+            padding: 0.1rem 0;
+            -moz-appearance: textfield;
+        }
+
+        .sched-time-hh::-webkit-inner-spin-button, .sched-time-hh::-webkit-outer-spin-button,
+        .sched-time-mm::-webkit-inner-spin-button, .sched-time-mm::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .sched-time-mm:disabled {
+            opacity: 0.4;
+        }
+
+        .sched-time-sep {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .schedule-window-row .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+
+        .schedule-window-row .slider-container input[type="range"] {
+            flex-grow: 1;
+            margin: 0;
+        }
+
+        .schedule-window-row .slider-container span {
+            font-size: 0.75rem;
+            width: 30px;
+            text-align: right;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .schedule-add-btn {
+            margin-top: 0.35rem;
+            background: none;
+            border: 1px dashed var(--border-color);
+            color: var(--primary);
+            border-radius: 6px;
+            padding: 0.25rem 0.6rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .schedule-add-btn:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .schedule-remove-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            cursor: pointer;
+            padding: 0.1rem 0.3rem;
+            border-radius: 4px;
+        }
+
+        .schedule-remove-btn:hover {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
         .slider-val-label {
             font-weight: 800;
             color: var(--primary);
@@ -1337,6 +1511,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
             .schedule-row div:last-child {
                 grid-column: span 4;
+                justify-content: flex-start;
+            }
+            .schedule-window-row {
+                grid-template-columns: 92px 92px 1fr 26px;
+                grid-template-rows: auto auto auto;
+                justify-content: space-between;
+                gap: 0.4rem;
+                padding: 0.4rem;
+            }
+            .schedule-window-row .slider-container,
+            .schedule-window-row .schedule-override-wrap {
+                grid-column: span 4;
+            }
+            .schedule-window-row .slider-container input[type="range"] {
+                min-width: 0;
+                width: 100%;
+            }
+            .schedule-window-row .schedule-override-wrap {
                 justify-content: flex-start;
             }
             
@@ -2120,36 +2312,156 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             cb.checked = !cb.checked;
         }
 
+        // scheduleDraft: a szerkesztés alatt álló ütemezés (mély másolat) -- az időintervallum
+        // hozzáadása/törlése ezt módosítja, majd újrarajzolja a felületet belőle. A mentés is
+        // ebből (a DOM aktuális állapotával szinkronizálva) épül fel.
+        let scheduleDraft = [];
+
         function renderSchedule(scheduleList) {
+            scheduleDraft = JSON.parse(JSON.stringify(scheduleList || []));
+            renderScheduleFromDraft();
+        }
+
+        // Saját (nem natív) HH:MM időbeviteli mező -- két külön számmezőből (óra, perc)
+        // épül fel, mert a natív <input type="time"> böngésző-szinten nem tud "24:00"-t
+        // (a nap vége) felvenni, a max. 23:59. Az óra 0-24-ig mehet; ha éppen 24, a perc
+        // csak 00 lehet (24:15 értelmetlen lenne), ilyenkor a perc mező inaktív.
+        function scheduleTimeInputHTML(idPrefix, timeStr) {
+            const parts = (timeStr || "00:00").split(':');
+            const hh = (parts[0] || "00").padStart(2, '0');
+            const mm = (parts[1] || "00").padStart(2, '0');
+            const mmDisabled = hh === "24";
+            return `<span class="sched-time-group">
+                <input type="number" class="sched-time-hh" id="${idPrefix}_hh" min="0" max="24" step="1" value="${hh}" oninput="scheduleTimeHourChanged('${idPrefix}')">
+                <span class="sched-time-sep">:</span>
+                <input type="number" class="sched-time-mm" id="${idPrefix}_mm" min="0" max="59" step="1" value="${mm}" oninput="scheduleTimeMinuteChanged('${idPrefix}')" ${mmDisabled ? 'disabled' : ''}>
+            </span>`;
+        }
+
+        // Óra mező: 0-24 közé szorítás (nincs körbefordulás). Ha az érték 24, a perc mezőt
+        // 00-ra állítja és letiltja (24:15 értelmetlen -- a nap csak 24:00-ig tart).
+        function scheduleTimeHourChanged(idPrefix) {
+            const hhEl = document.getElementById(`${idPrefix}_hh`);
+            const mmEl = document.getElementById(`${idPrefix}_mm`);
+            let hh = parseInt(hhEl.value);
+            if (isNaN(hh)) hh = 0;
+            if (hh > 24) hh = 24;
+            if (hh < 0) hh = 0;
+            hhEl.value = String(hh).padStart(2, '0');
+            if (hh === 24) {
+                mmEl.value = "00";
+                mmEl.disabled = true;
+            } else {
+                mmEl.disabled = false;
+            }
+        }
+
+        // Perc mező: 0-59 közötti körbefordulás (59 fölé lépve 00-ra ugrik, negatívból 59-re).
+        function scheduleTimeMinuteChanged(idPrefix) {
+            const mmEl = document.getElementById(`${idPrefix}_mm`);
+            let mm = parseInt(mmEl.value);
+            if (isNaN(mm)) mm = 0;
+            if (mm >= 60) mm = mm % 60;
+            if (mm < 0) mm = 59;
+            mmEl.value = String(mm).padStart(2, '0');
+        }
+
+        // Visszaolvassa egy scheduleTimeInputHTML() által létrehozott mezőpár aktuális
+        // értékét "ÓÓ:PP" sztringgé összefűzve -- null-t ad, ha a mezők nem léteznek.
+        function scheduleTimeReadValue(idPrefix) {
+            const hhEl = document.getElementById(`${idPrefix}_hh`);
+            const mmEl = document.getElementById(`${idPrefix}_mm`);
+            if (!hhEl || !mmEl) return null;
+            let hh = parseInt(hhEl.value);
+            if (isNaN(hh)) hh = 0;
+            let mm = parseInt(mmEl.value);
+            if (isNaN(mm)) mm = 0;
+            return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+        }
+
+        // A DOM-ban jelenleg élő (esetleg még nem mentett) mezőértékeket visszaírja a
+        // scheduleDraft-ba -- ezt kell hívni MIELŐTT egy időintervallum hozzáadása/törlése
+        // vagy a mentés újrarajzolja/elküldi az ütemezést, hogy a felhasználó egyéb, még
+        // el nem mentett szerkesztései ne vesszenek el.
+        function syncScheduleDraftFromDOM() {
+            scheduleDraft.forEach((sched, dayIndex) => {
+                const enabledEl = document.getElementById(`sched_enabled_${dayIndex}`);
+                if (enabledEl) sched.enabled = enabledEl.checked;
+                (sched.windows || []).forEach((win, winIndex) => {
+                    const startVal = scheduleTimeReadValue(`sched_start_${dayIndex}_${winIndex}`);
+                    if (startVal) win.start = startVal;
+                    const stopVal = scheduleTimeReadValue(`sched_stop_${dayIndex}_${winIndex}`);
+                    if (stopVal) win.stop = stopVal;
+                    const ampsEl = document.getElementById(`sched_amps_${dayIndex}_${winIndex}`);
+                    const overrideEl = document.getElementById(`sched_override_auto_${dayIndex}_${winIndex}`);
+                    if (ampsEl) win.amps = parseInt(ampsEl.value);
+                    if (overrideEl) win.override_auto = overrideEl.checked;
+                });
+            });
+        }
+
+        function addScheduleWindow(dayIndex) {
+            syncScheduleDraftFromDOM();
+            scheduleDraft[dayIndex].windows.push({start: "08:00", stop: "16:00", amps: 16, override_auto: true});
+            renderScheduleFromDraft();
+        }
+
+        function removeScheduleWindow(dayIndex, winIndex) {
+            syncScheduleDraftFromDOM();
+            scheduleDraft[dayIndex].windows.splice(winIndex, 1);
+            renderScheduleFromDraft();
+        }
+
+        function renderScheduleFromDraft() {
             const container = document.getElementById('schedule-rows-container');
             container.innerHTML = '';
-            if (!scheduleList || scheduleList.length === 0) return;
-            
-            scheduleList.forEach((sched, index) => {
-                const row = document.createElement('div');
-                row.className = 'schedule-row';
-                
-                row.innerHTML = `
+            if (!scheduleDraft || scheduleDraft.length === 0) return;
+
+            scheduleDraft.forEach((sched, dayIndex) => {
+                const group = document.createElement('div');
+                group.className = 'schedule-day-group';
+
+                const header = document.createElement('div');
+                header.className = 'schedule-day-header';
+                header.innerHTML = `
                     <label class="sched-day-label"></label>
-                    <input type="checkbox" id="sched_enabled_${index}" ${sched.enabled ? 'checked' : ''}>
-                    <input type="time" id="sched_start_${index}" value="${sched.start}">
-                    <input type="time" id="sched_stop_${index}" value="${sched.stop}">
-                    <div class="slider-container">
-                        <input type="range" id="sched_amps_${index}" min="6" max="16" step="1" value="${sched.amps || 16}" oninput="document.getElementById('sched_amps_val_${index}').innerText = this.value + 'A'">
-                        <span id="sched_amps_val_${index}">${sched.amps || 16}A</span>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:0.2rem;">
-                        <input type="checkbox" id="sched_override_auto_${index}" ${sched.override_auto ? 'checked' : ''}>
-                        <label for="sched_override_auto_${index}" style="font-size:0.75rem; cursor:pointer; color:var(--text-muted); display: inline-flex; align-items: center;">
-                            Solar Auto felülírása
-                            <span class="tooltip-container tooltip-align-left">ⓘ<span class="tooltip-text">Ha be van kapcsolva, az időablakon belül a töltés fixen futni fog a beállított árammal, teljesen figyelmen kívül hagyva a Solar Auto szabályokat (pl. akku szintet).</span></span>
-                        </label>
-                    </div>
+                    <input type="checkbox" id="sched_enabled_${dayIndex}" ${sched.enabled ? 'checked' : ''}>
                 `;
                 // A napnevet textContent-tel írjuk be (nem innerHTML-be interpolálva),
                 // hogy egy esetleg mégis átcsúszó rosszindulatú 'day' érték se hajtódjon végre HTML/script-ként.
-                row.querySelector('.sched-day-label').textContent = sched.day;
-                container.appendChild(row);
+                header.querySelector('.sched-day-label').textContent = sched.day;
+                group.appendChild(header);
+
+                (sched.windows || []).forEach((win, winIndex) => {
+                    const row = document.createElement('div');
+                    row.className = 'schedule-window-row';
+                    row.innerHTML = `
+                        ${scheduleTimeInputHTML(`sched_start_${dayIndex}_${winIndex}`, win.start)}
+                        ${scheduleTimeInputHTML(`sched_stop_${dayIndex}_${winIndex}`, win.stop)}
+                        <div class="slider-container">
+                            <input type="range" id="sched_amps_${dayIndex}_${winIndex}" min="6" max="16" step="1" value="${win.amps || 16}" oninput="document.getElementById('sched_amps_val_${dayIndex}_${winIndex}').innerText = this.value + 'A'">
+                            <span id="sched_amps_val_${dayIndex}_${winIndex}">${win.amps || 16}A</span>
+                        </div>
+                        <div class="schedule-override-wrap" style="display:flex; align-items:center; gap:0.2rem;">
+                            <input type="checkbox" id="sched_override_auto_${dayIndex}_${winIndex}" ${win.override_auto ? 'checked' : ''}>
+                            <label for="sched_override_auto_${dayIndex}_${winIndex}" style="font-size:0.75rem; cursor:pointer; color:var(--text-muted); display: inline-flex; align-items: center;">
+                                Solar Auto felülírása
+                                <span class="tooltip-container tooltip-align-left">ⓘ<span class="tooltip-text">Ha be van kapcsolva, ezen az időintervallumon belül a töltés fixen futni fog a beállított árammal, teljesen figyelmen kívül hagyva a Solar Auto szabályokat (pl. akku szintet).</span></span>
+                            </label>
+                        </div>
+                        <button type="button" class="schedule-remove-btn" onclick="removeScheduleWindow(${dayIndex}, ${winIndex})" title="Időintervallum törlése">✕</button>
+                    `;
+                    group.appendChild(row);
+                });
+
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'schedule-add-btn';
+                addBtn.textContent = '+ Töltési idő hozzáadása';
+                addBtn.onclick = () => addScheduleWindow(dayIndex);
+                group.appendChild(addBtn);
+
+                container.appendChild(group);
             });
         }
 
@@ -3069,19 +3381,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function saveSchedule() {
-            const schedule = [];
-            const days = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"];
-            for (let i = 0; i < 7; i++) {
-                const day = days[i];
-                const enabled = document.getElementById(`sched_enabled_${i}`).checked;
-                const start = document.getElementById(`sched_start_${i}`).value;
-                const stop = document.getElementById(`sched_stop_${i}`).value;
-                const amps = parseInt(document.getElementById(`sched_amps_${i}`).value);
-                const override_auto = document.getElementById(`sched_override_auto_${i}`).checked;
-                
-                schedule.push({ day, enabled, start, stop, amps, override_auto });
-            }
-            
+            syncScheduleDraftFromDOM();
+
             try {
                 const response = await fetch('/api/config', {
                     method: 'POST',
@@ -3095,14 +3396,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         charger_max_amps: currentConfig.charger_max_amps,
                         force_submode: currentConfig.force_submode,
                         schedule_solar_auto: currentConfig.schedule_solar_auto,
-                        forced_schedule: schedule,
+                        forced_schedule: scheduleDraft,
                         auto_enabled: currentConfig.auto_enabled,
                         schedule_enabled: currentConfig.schedule_enabled
                     })
                 });
-                const result = await response.json();
+                const result = await response.json().catch(() => null);
+                if (!response.ok || !result || result.status !== 'success') {
+                    const detail = (result && result.message) ? result.message : ('HTTP ' + response.status);
+                    alert('HIBA: Ütemezés mentése nem sikerült! (' + detail + ')');
+                    return;
+                }
                 alert("Ütemezés elmentve!");
-                currentConfig.forced_schedule = schedule;
+                currentConfig.forced_schedule = scheduleDraft;
             } catch (error) {
                 alert("Sikertelen ütemezés mentés: " + error);
             }

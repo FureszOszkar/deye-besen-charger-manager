@@ -29,13 +29,13 @@ DEFAULT_CONFIG = {
     "web_password": "admin",
     "pbkdf2_iterations": 100000,
     "forced_schedule": [
-        {"day": "Hétfő", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Kedd", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Szerda", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Csütörtök", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Péntek", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Szombat", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True},
-        {"day": "Vasárnap", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}
+        {"day": "Hétfő", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Kedd", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Szerda", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Csütörtök", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Péntek", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Szombat", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]},
+        {"day": "Vasárnap", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]}
     ]
 }
 
@@ -107,15 +107,15 @@ shared_state = {
     "auto_enabled": False,
     "schedule_enabled": False,
     "forced_schedule": [
-        {"day": "Hétfő", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Kedd", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Szerda", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Csütörtök", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Péntek", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True},
-        {"day": "Szombat", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True},
-        {"day": "Vasárnap", "enabled": False, "start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}
+        {"day": "Hétfő", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Kedd", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Szerda", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Csütörtök", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Péntek", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
+        {"day": "Szombat", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]},
+        {"day": "Vasárnap", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]}
     ],
-    
+
     # Logok és hibaüzenetek
     "logs": [],
     "error_message": "",
@@ -192,14 +192,36 @@ def load_config():
         shared_state["web_auth_enabled"] = bool(config.get("web_auth_enabled", True))
         shared_state["started_by_controller"] = bool(config.get("started_by_controller", False))
         
-        # Győződjünk meg róla, hogy minden napnak van override_auto mezője
+        # Ütemezés betöltése + migráció: a régi formátum (napi egyetlen start/stop/amps
+        # mező) automatikusan egy 1 elemű "windows" listává alakul, hogy a korábban
+        # elmentett config.json-ok törés nélkül tovább működjenek az új, napi-több-
+        # időintervallumos formátumra váltó kóddal.
         sched = config.get("forced_schedule", DEFAULT_CONFIG["forced_schedule"])
         try:
-            for day_item in sched:
-                if "override_auto" not in day_item:
-                    day_item["override_auto"] = True
             if not isinstance(sched, list) or len(sched) != 7:
                 raise ValueError("A forced_schedule nem 7 elemű lista.")
+            migrated = []
+            for day_item in sched:
+                if not isinstance(day_item, dict):
+                    raise ValueError("A forced_schedule egy eleme nem objektum.")
+                if "windows" not in day_item:
+                    # Régi formátum -> becsomagolás egy elemű windows listába
+                    day_item = {
+                        "day": day_item.get("day"),
+                        "enabled": bool(day_item.get("enabled", False)),
+                        "windows": [{
+                            "start": day_item.get("start", "08:00"),
+                            "stop": day_item.get("stop", "16:00"),
+                            "amps": day_item.get("amps", 16),
+                            "override_auto": bool(day_item.get("override_auto", True)),
+                        }],
+                    }
+                else:
+                    for window in day_item.get("windows", []):
+                        if "override_auto" not in window:
+                            window["override_auto"] = True
+                migrated.append(day_item)
+            sched = migrated
         except (TypeError, ValueError) as e:
             print(f"Hibás forced_schedule a konfigurációs fájlban: {e}. Alapértelmezett ütemezés használata.")
             sched = json.loads(json.dumps(DEFAULT_CONFIG["forced_schedule"]))

@@ -3,8 +3,6 @@
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
 
-<img width="1884" height="885" alt="kép" src="https://github.com/user-attachments/assets/506da22f-1c1a-4b82-9252-da9a2e27e46f" />
-
 ---
 
 ## 1. Hardver modellek és specifikációk
@@ -141,6 +139,7 @@ Ez a teljesen autonóm, "állítsd be és felejtsd el" mód, ami a napelemes fel
 *   **Napelemes mód bekapcsolása:** aktiválja a napelemes felesleg-logikát.
 *   **Maximális töltőáram (6-16A):** beállítja a maximális töltési sebességet.
 *   **Indítási akku szint (%):** az a minimális otthoni akkumulátor-szint, ami alatt a töltés nem indulhat el (ajánlott: `100%`).
+*   **Leállítási akku szint (%):** az a minimális otthoni akkumulátor töltöttség (SoC %), ami alatt a napelemes töltés leáll, hogy ne merítse le túlságosan az akkumulátort. A `0%` kikapcsolja ezt a korlátot. **Ha be van kapcsolva** (nem 0), a szerver megköveteli, hogy legalább **2 százalékponttal** alacsonyabb legyen, mint az Indítási akku szint — ez véd az ellen, hogy a két érték egybeesése (pl. mindkettő `99%`) esetén egyetlen SoC-mérési ingadozás azonnali, felesleges indítás/leállítás pattogást okozzon.
 *   **Hálózati fogyasztás küszöbérték (W):** az a hálózati import-küszöb (pl. `2000 W`), ami felett elindul a késleltetett leállítás időzítője.
 *   **Hálózati töltés késleltetett leállítása (perc):** segít áthidalni az átvonuló felhőket. A rendszer ennyi percig türelmes a hálózati importtal, mielőtt leállítaná a töltést. A `0` érték **azonnali** leállítást jelent, feltéve hogy a hálózati teljesítmény küszöbérték nagyobb, mint `0`.
 *   **Ház UPS túlterhelés-védelem (W):** ha az UPS port terhelése meghaladja ezt az értéket, a töltés azonnal leáll (ajánlott: `3000 W` – `5000 W`, az inverter és a kismegszakítók névleges értékétől függően).
@@ -150,11 +149,11 @@ Ez a teljesen autonóm, "állítsd be és felejtsd el" mód, ami a napelemes fel
 Lehetővé teszi az olcsó éjszakai áramtarifák vagy meghatározott töltési ablakok kihasználását.
 *   **Időzített mód bekapcsolása:** aktiválja a heti ütemezési szabályokat.
 *   **Napelemes szabályok futtatása az időablakokon kívül:** ha be van kapcsolva, az időablakokon kívül a rendszer visszaáll a Solar Auto szabályokra (nappal napelemről, éjjel ütemezett hálózati töltés).
-*   **Heti ütemezési táblázat:** a hét minden napja egyénileg beállítható:
-    *   Ütemezés be/kikapcsolása.
-    *   Kezdő és befejező idő (ÓÓ:PP).
-    *   Áramkorlát (6-16A).
-    *   **Solar Auto felülírása:** ha be van jelölve, az időablak alatt a napelemes és akku-leállítási szabályok figyelmen kívül maradnak (garantált éjszakai/időzített töltés).
+*   **Heti ütemezési táblázat:** a hét minden napja egyénileg beállítható, és **naponta tetszőleges számú (max. 8) különálló időintervallum** vehető fel a "+ Töltési idő hozzáadása" gombbal:
+    *   Ütemezés be/kikapcsolása (naponta).
+    *   Minden időintervallumhoz: kezdő és befejező idő (saját, két számmezős óra:perc beviteli mező — az óra `00`-`24`-ig adható meg, a `24:00` a nap végét jelenti), saját áramkorlát (6-16A), és saját **Solar Auto felülírás** kapcsoló.
+    *   **Éjszakai (éjfélen átnyúló) töltés:** két külön, egymást követő napi intervallummal állítható be — pl. a mai nap utolsó intervalluma "22:00"-tól "24:00"-ig, a holnapi nap első intervalluma "00:00"-tól. Egy napon belül az intervallumok nem fedhetik át egymást, de érinthetik egymást (egyik vége = másik kezdete) — ez a folytonos, megszakítás nélküli töltés normál módja; a töltés csak akkor indul újra a határon, ha az áramerősség ténylegesen változik.
+    *   **Solar Auto felülírása:** ha be van jelölve egy adott intervallumnál, azon belül a napelemes és akku-leállítási szabályok figyelmen kívül maradnak (garantált éjszakai/időzített töltés).
 
 ### 3. Kézi Kényszerített (Force) Mód
 Ezzel a móddal felülbírálhatsz minden automatizációt, és manuálisan adhatsz ki Start/Stop parancsokat, és állíthatod be az Amper értéket a csúszkával.
@@ -179,7 +178,7 @@ A szoftver számos biztonsági mechanizmust tartalmaz a hardver és a hálózat 
     *   **AES-256-GCM payload titkosítás:** sikeres bejelentkezés után minden API forgalom (parancsok és telemetria) valós időben titkosítva/visszafejtve utazik, egy PBKDF2-SHA256-tal származtatott session kulcs segítségével. Ez megvédi a rendszert a helyi hálózati lehallgatás ellen.
     *   **Session lejárat:** a bejelentkezési session tokenek 24 óra után automatikusan lejárnak, ezt követően újra be kell jelentkezni.
     *   **Feloldás csak bejelentkezve:** a biztonsági zárolás (Lockdown) feloldása (`/api/unlock`) is hitelesített session-t igényel — a helyi hálózaton senki sem tudja feloldani bejelentkezés nélkül.
-    *   **Heti ütemezés validáció:** a szerver szigorúan ellenőrzi a beküldött heti ütemezés adatait (napnevek, időformátum, áramerősség-tartomány), mielőtt elmentené — ez védi a rendszert a hibás vagy rosszindulatú adatoktól.
+    *   **Heti ütemezés validáció:** a szerver szigorúan ellenőrzi a beküldött heti ütemezés adatait (napnevek, időformátum, áramerősség-tartomány, napon belüli időintervallum-átfedések), mielőtt elmentené — ez védi a rendszert a hibás vagy rosszindulatú adatoktól.
 3.  **Relévédelem (Cooldown):** minden leállított vagy sikertelen töltési kísérlet után a program **2 perces (120 másodperces) várakozási időt** kényszerít ki. Ez idő alatt semmilyen automatizmus nem indíthatja újra a töltést, védve a töltő fizikai reléit a idő előtti kopástól és beragadástól.
 4.  **Fail-Safe (hibabiztos) leállítás:** ha a töltés nem indul el 60 másodpercen belül egy BLE start parancs után, a rendszer hibát naplóz. Ha ez 3 egymást követő alkalommal megtörténik, a rendszer automatikusan leállítja a további próbálkozásokat, és **Figyelés (Monitoring)** módba vált, hogy elkerülje a végtelen BLE parancsciklusokat.
 5.  **Hálózati aszinkronizáció és telemetria Watchdog (önjavítás):**
@@ -189,11 +188,12 @@ A szoftver számos biztonsági mechanizmust tartalmaz a hardver és a hálózat 
     *   Ha a kapcsolat állapota `LOGGED_IN`, de 15 másodpercig nem érkezik telemetria csomag a töltőtől, a beépített watchdog időtúllépést naplóz, lezárja a halott kapcsolatot, és tisztán újraindítja a BLE felfedezési és újracsatlakozási folyamatot.
     *   **Szálbiztos telemetria-feldolgozás:** a Bleak háttérszálról érkező értesítések a `main_loop` globális referencián keresztül, `asyncio.run_coroutine_threadsafe` segítségével kerülnek vissza a fő eseményhurok szálára, elkerülve a `RuntimeError: no running event loop` kivételeket.
 6.  **Anti-Flapping Cooldown:** megakadályozza a gyors Start/Stop ciklusokat egy 20 másodperces várakozási idő kikényszerítésével 2 egymást követő állapotváltozás után.
-7.  **Biztonsági Zárolás (Lockdown):** teljesen zárolja a rendszert, ha 40 másodpercen belül 5 állapotváltozás történik, vagy ha 10 egymást követő automatikus parancs fut le emberi beavatkozás nélkül. A műszerfalról manuális feloldást (Unlock) igényel.
+7.  **Biztonsági Zárolás (Lockdown):** teljesen zárolja a rendszert, ha 40 másodpercen belül 5 állapotváltozás történik, vagy ha 5 percen belül 10 automatikus parancs fut le emberi beavatkozás nélkül (mozgó időablak — a régebbi, 5 percnél korábbi parancsok nem számítanak bele, így egy hosszú távon zavartalanul futó automatizmus nem gyűjt fel indokolatlanul sok bejegyzést). A műszerfalról manuális feloldást (Unlock) igényel.
 8.  **Teljes Ház Terhelésvédelem:** a túlterhelés védelem a `(UPS Terhelés + Töltő Terhelés)` összegét értékeli ki a főmegszakítók védelme érdekében. A túlterhelésből fakadó leállítások és a manuális Hard STOP parancsok mindig megkerülik a cooldown/lockdown korlátozásokat.
 9.  **Központi Ping-Pong Watchdog (Supervisor):** egy dedikált felügyelő mechanizmus védi a szoftvert a leállásoktól. Kétféle anomáliát kezel automatikusan:
     *   *Összeomlás (Crash) védelem:* ha bármelyik háttérszál váratlan kivétellel leállna, a Watchdog a főprogram összeomlása nélkül elkapja a hibát, és azonnal újraindítja az adott szálat.
     *   *Befagyás (Freeze) védelem:* a szálak ciklikusan életjelet (PONG) hagynak a memóriában. Ha a Watchdog 30 másodpercig nem észlel életjelet egy száltól, erőszakosan leállítja, majd tiszta lappal újraindítja. A webes kiszolgáló szál is a Watchdog felügyelete alatt áll: ha teljesen elhalna, a Watchdog újraindítja; ha él, de befagyott (nem küld PONG-ot), a teljes folyamat kényszerítve újraindul, amit a systemd/`Restart=on-failure` automatikusan felügyel.
+10. **Kihúzott Töltőkábel Védelem:** ha a töltőkábel nincs bedugva az autóba (amit a töltő saját BLE-telemetriája jelez), a rendszer sem automata (Solar Auto), sem ütemezett START parancsot nem küld. Induláskor, amíg a valós telemetria meg nem érkezik a töltőtől, a program biztonságosan azt feltételezi, hogy a kábel **nincs** bedugva — csak a töltő tényleges visszajelzése után enged automata parancsot.
 
 ---
 

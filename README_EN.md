@@ -139,6 +139,7 @@ A fully autonomous, "set and forget" mode designed to maximize the utilization o
 *   **Enable Solar Auto:** Activates the solar excess logic.
 *   **Max Charger Current (6-16A):** Sets the maximum charging speed.
 *   **Start Battery SoC (%):** The minimum home battery level below which charging cannot start (recommended: `100%`).
+*   **Stop Battery SoC (%):** The minimum home battery level (SoC %) below which solar charging stops, to avoid excessively draining the home battery. `0%` disables this limit. **When enabled** (non-zero), the server requires it to be at least **2 percentage points** lower than the Start Battery SoC — this prevents the two thresholds coinciding (e.g. both at `99%`), which would otherwise let a single SoC measurement fluctuation trigger immediate, unnecessary start/stop flapping.
 *   **Grid Consumption Limit (W):** The grid import threshold (e.g., `2000 W`) above which the delayed shutdown timer begins.
 *   **Delayed Shutdown (minutes):** Helps bridge passing clouds. The system allows grid import for this many minutes before stopping. Setting this to `0` means IMMEDIATE shutdown, provided the grid power threshold is greater than `0`.
 *   **UPS Power Limit (W):** If the load on the UPS port exceeds this value, charging stops instantly (recommended: `3000 W` – `5000 W`, depending on inverter and breaker ratings).
@@ -148,11 +149,11 @@ A fully autonomous, "set and forget" mode designed to maximize the utilization o
 Time-based charging control with weekly scheduling, allowing you to take advantage of cheap night-time electricity tariffs or defined charging windows.
 *   **Enable Scheduled Mode:** Activates weekly schedule rules.
 *   **Run Solar rules outside windows:** If enabled, the system falls back to Solar Auto rules outside of the scheduled time windows (charging from solar during the day, and scheduled grid power at night).
-*   **Weekly Schedule Table:** Each day of the week can be configured individually:
-    *   Enable/Disable schedule.
-    *   Start and Stop times (HH:MM).
-    *   Current limit (6-16A).
-    *   **Override Solar Auto:** If checked, solar and battery shutdown rules are ignored during this window (guaranteed night/timed charging).
+*   **Weekly Schedule Table:** Each day of the week can be configured individually, and **any number (up to 8) of separate time windows** can be added per day via the "+ Add charging time" button:
+    *   Enable/Disable schedule (per day).
+    *   Per time window: Start and Stop times (a custom two-field hour:minute input — the hour can be set from `00` to `24`, where `24:00` means the end of the day), its own current limit (6-16A), and its own **Override Solar Auto** toggle.
+    *   **Overnight (midnight-spanning) charging:** configured as two separate, consecutive daily windows — e.g. today's last window from "22:00" to "24:00", and tomorrow's first window starting at "00:00". Windows within the same day must not overlap, but they may touch (one window's end equals the next one's start) — this is the normal way to represent continuous, uninterrupted charging; the charger only restarts at the boundary if the current limit actually changes.
+    *   **Override Solar Auto:** If checked for a given window, solar and battery shutdown rules are ignored during that window (guaranteed night/timed charging).
 
 ### 3. Force (Manual Override) Mode
 This mode lets you override all automation and manually issue Start/Stop commands, as well as set the current with the slider.
@@ -177,7 +178,7 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   **AES-256-GCM Payload Encryption:** Upon successful login, all API traffic (commands and telemetry) is encrypted and decrypted on the fly using a session key derived via PBKDF2-SHA256. This prevents local network sniffing.
     *   **Session Expiry:** Login session tokens now expire automatically after 24 hours, after which the client must log in again.
     *   **Authenticated Unlock Only:** Clearing a safety Lockdown (`/api/unlock`) also requires an authenticated session — no one on the local network can release it without logging in.
-    *   **Weekly Schedule Validation:** The server strictly validates the weekly schedule payload (weekday names, time format, current range) before saving it, protecting the system from malformed or malicious data.
+    *   **Weekly Schedule Validation:** The server strictly validates the weekly schedule payload (weekday names, time format, current range, same-day time-window overlaps) before saving it, protecting the system from malformed or malicious data.
 3.  **Relay Protection (Cooldown):** After any stopped or failed charging attempt, the program enforces a **2-minute (120 seconds) cooldown period**. During this time, no automation is allowed to restart charging, protecting the charger's physical relays from premature wear and welding.
 4.  **Fail-Safe Disarm:** If the charging fails to start within 60 seconds after a BLE start command, a failure is logged. If this happens 3 consecutive times, the system automatically stops further attempts and switches to **Monitoring** mode to prevent endless BLE command cycles.
 5.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
@@ -187,11 +188,12 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   If the connection state is `LOGGED_IN` but no telemetry packets arrive from the charger for 15 seconds, the built-in watchdog logs a timeout, closes the dead connection, and cleanly restarts the BLE discovery and reconnection process.
     *   **Thread-Safe Telemetry Processing:** Notifications arriving from Bleak's background worker thread are dispatched back to the main event loop thread using `asyncio.run_coroutine_threadsafe` via the global `main_loop` reference, preventing thread-level `RuntimeError: no running event loop` exceptions.
 6.  **Anti-Flapping Cooldown:** Prevents rapid Start/Stop cycles by enforcing a 20-second cooldown period after 2 consecutive state changes.
-7.  **Safety Lockdown:** Fully locks the system if 5 state changes occur within 40 seconds, or if 10 consecutive automatic commands run without human intervention. Requires manual Unlock from the dashboard.
+7.  **Safety Lockdown:** Fully locks the system if 5 state changes occur within 40 seconds, or if 10 automatic commands run within a 5-minute sliding window without human intervention (commands older than 5 minutes drop out of the count, so a long-running, healthy automation never accumulates an unbounded count). Requires manual Unlock from the dashboard.
 8.  **Total House Load Protection:** The overload protection evaluates the sum of `(UPS Load + Charger Load)` to protect the main breakers. Overload-triggered shutdowns and manual Hard STOP commands always bypass the cooldown/lockdown restrictions.
 9.  **Central Ping-Pong Watchdog (Supervisor):** A dedicated supervisory mechanism protects the software from stalling. It automatically handles two kinds of anomalies:
     *   *Crash protection:* If any background thread stops due to an unexpected exception, the Watchdog catches the error without crashing the main program, and immediately restarts that thread.
     *   *Freeze protection:* Threads cyclically leave a heartbeat (PONG) in memory. If the Watchdog detects no heartbeat from a thread for 30 seconds, it forcibly stops it and restarts it cleanly. The web server thread is also under Watchdog supervision: if it dies entirely, the Watchdog restarts it; if it's alive but frozen (not sending a PONG), the entire process is forced to exit, which systemd/`Restart=on-failure` automatically supervises and restarts.
+10. **Unplugged Charging Cable Protection:** if the charging cable is not plugged into the car (as reported by the charger's own BLE telemetry), the system will not send an automatic (Solar Auto) or scheduled START command. On startup, until real telemetry arrives from the charger, the program safely assumes the cable is **not** plugged in — it only allows automatic commands once the charger's actual feedback confirms the state.
 
 ---
 

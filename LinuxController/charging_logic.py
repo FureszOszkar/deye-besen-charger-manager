@@ -695,47 +695,26 @@ async def run_charge_controller():
                 except Exception:
                     pass
 
-        # Heti ütemezési időablak előzetes kiszámítása (minden üzemmódban elérhetővé tesszük a szabályellenőrzéshez)
-        current_day_idx = DAYS_MAP.index(current_day_name)
-        prev_day_name = DAYS_MAP[(current_day_idx - 1) % 7]
-
+        # Heti ütemezési időablak kiszámítása (minden üzemmódban elérhetővé tesszük a szabályellenőrzéshez).
+        # Minden időintervallum egyetlen naptári napon belül van (nincs éjfélen átnyúlás) --
+        # az éjszakai töltést a felhasználó két, egymást követő napi intervallummal állítja
+        # be (pl. mai nap "22:00"-"24:00" + holnapi nap "00:00"-"06:00"), ezért itt nincs
+        # szükség tegnapi/mai kereszt-napi számításra.
         current_sched = next((item for item in forced_schedule if item["day"] == current_day_name), None)
-        prev_sched = next((item for item in forced_schedule if item["day"] == prev_day_name), None)
 
         in_interval = False
         target_amps = 16
         override_auto = True
 
-        # Aktuális nap ütemezése
         if current_sched and current_sched.get("enabled", False):
-            start_m = time_to_minutes(current_sched["start"])
-            stop_m = time_to_minutes(current_sched["stop"])
-            amps = current_sched.get("amps", 16)
-            day_override = current_sched.get("override_auto", True)
-
-            if start_m < stop_m:
+            for window in current_sched.get("windows", []):
+                start_m = time_to_minutes(window.get("start", "00:00"))
+                stop_m = time_to_minutes(window.get("stop", "00:00"))  # "24:00" -> 1440, természetesen kezelve
                 if start_m <= current_minutes < stop_m:
                     in_interval = True
-                    target_amps = amps
-                    override_auto = day_override
-            else:  # Éjszakai átnyúlás a jelenlegi napon
-                if current_minutes >= start_m:
-                    in_interval = True
-                    target_amps = amps
-                    override_auto = day_override
-
-        # Előző napi átnyúló ütemezés
-        if not in_interval and prev_sched and prev_sched.get("enabled", False):
-            start_m = time_to_minutes(prev_sched["start"])
-            stop_m = time_to_minutes(prev_sched["stop"])
-            amps = prev_sched.get("amps", 16)
-            day_override = prev_sched.get("override_auto", True)
-
-            if start_m > stop_m:  # Átnyúló volt
-                if current_minutes < stop_m:
-                    in_interval = True
-                    target_amps = amps
-                    override_auto = day_override
+                    target_amps = window.get("amps", 16)
+                    override_auto = window.get("override_auto", True)
+                    break
 
         # Ellenőrizzük a kapcsolatokat (csak ha nem szimulációról van szó)
         if not sim_mode and (not inverter_ok or not charger_ok):
