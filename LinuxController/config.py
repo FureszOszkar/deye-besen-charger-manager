@@ -88,7 +88,7 @@ shared_state = {
     "currents": [0.0, 0.0, 0.0],  # L1, L2, L3 (A)
     "energy_total": 0.0,          # kWh
     "temperature_internal": 0.0,  # °C
-    "pull_plug": False,           # Csatlakozó állapota
+    "pull_plug": True,             # Csatlakozó állapota (biztonságos alapérték: "nincs bedugva", amíg a töltő valós telemetriája felül nem írja)
     "charging_active": False,     # BLE szerinti futás állapot
     "last_charge": {},            # Legutóbbi lezárt töltési rekord adatai
     
@@ -122,7 +122,7 @@ shared_state = {
     "cooldown_until": 0.0,        # Timestamp a következő próbálkozásig
     "lockdown_active": False,
     "transition_timestamps": [],
-    "consecutive_auto_commands": 0,
+    "auto_command_timestamps": [],  # Automata parancsok időbélyegei (5 perces mozgó ablak, RENDSZER ZÁROLVA szabályhoz)
     
     # Szimulációs és tesztelési paraméterek
     "simulation": False,
@@ -140,7 +140,9 @@ shared_state = {
 }
 
 # Thread-safe lock az állapot módosítása számára
-state_lock = threading.Lock()
+# RLock (nem sima Lock), hogy ugyanaz a szál (pl. egy már state_lock alatt futó
+# kódág, ami log_message()-et hív) újra be tudjon lépni self-deadlock nélkül.
+state_lock = threading.RLock()
 logs_limit = 50
 
 _last_initiated_session_id = ""

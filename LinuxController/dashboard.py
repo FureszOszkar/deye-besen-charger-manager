@@ -3450,7 +3450,7 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             with state_lock:
                 shared_state["lockdown_active"] = False
                 shared_state["transition_timestamps"].clear()
-                shared_state["consecutive_auto_commands"] = 0
+                shared_state["auto_command_timestamps"] = []
             log_message("🔐 Biztonsági zárolás (lockdown) és cooldown feloldva a felhasználó által.")
             self._send_encrypted_json({"status": "success"})
             return
@@ -3484,6 +3484,13 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                 if new_start is not None and new_stop is not None and new_start < new_stop:
                     load_config()
                     self._send_encrypted_json({"status": "error", "message": f"Hiba: A Start % ({new_start}%) nem lehet kisebb a Stop %-nál ({new_stop}%)!"})
+                    return
+
+                # Minimum 2 százalékpontos rés kikényszerítése Start és Stop % között (ha a Stop % be van kapcsolva),
+                # hogy egyetlen SoC-mérési ingadozás ne okozzon azonnali indítás/leállítás pattogást.
+                if new_start is not None and new_stop is not None and new_stop > 0 and (new_start - new_stop) < 2:
+                    load_config()
+                    self._send_encrypted_json({"status": "error", "message": f"Hiba: A Start % ({new_start}%) és a Stop % ({new_stop}%) közötti különbségnek legalább 2 százalékpontnak kell lennie, különben a rendszer a SoC ingadozása miatt feleslegesen gyakran kapcsolgatna!"})
                     return
 
                 if "forced_schedule" in config_data:

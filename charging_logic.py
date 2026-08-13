@@ -462,41 +462,59 @@ async def run_charge_controller():
 
     async def try_send_ble_action(packet, action, is_manual_hard_stop=False, is_safety_stop=False, is_manual_start=False):
         global shared_state
+        # A log_message() hívásokat SZÁNDÉKOSAN a `with state_lock:` blokkon KÍVÜLRE tettük.
+        # A log_message() maga is megpróbálja megfogni a state_lock-ot -- ha ez a blokkon
+        # belülről történne, ugyanaz a szál próbálná újra megfogni a már nála lévő zárat,
+        # ami self-deadlockhoz (a teljes program végleges lefagyásához) vezetne.
+        blocked = False
+        log_after = None
+
         with state_lock:
             if shared_state.get("lockdown_active") and not (is_manual_hard_stop or is_safety_stop):
-                log_message("[VEZÉRLÉS] Parancs blokkolva: A vezérlő biztonsági zárolás (lockdown) alatt áll.")
-                return False
-
-            import time
-            now = time.time()
-            ts = shared_state.get("transition_timestamps", [])
-            ts = [t for t in ts if now - t < 40]
-            shared_state["transition_timestamps"] = ts
-            
-            recent_20s = [t for t in ts if now - t < 20]
-            if len(recent_20s) >= 2 and not (is_manual_hard_stop or is_safety_stop):
-                shared_state["cooldown_until"] = now + 20
-                log_message("[VEZÉRLÉS] Parancs blokkolva: Túl gyakori kapcsolás (cooldown).")
-                return False
-                
-            if len(ts) >= 4 and not (is_manual_hard_stop or is_safety_stop):
-                shared_state["lockdown_active"] = True
-                log_message("[VEZÉRLÉS] Parancs blokkolva: 40 mp-en belüli 5. kapcsolás, RENDSZER ZÁROLVA.")
-                return False
-                
-            if not (is_manual_hard_stop or is_manual_start):
-                c = shared_state.get("consecutive_auto_commands", 0)
-                c += 1
-                shared_state["consecutive_auto_commands"] = c
-                if c >= 10:
-                    shared_state["lockdown_active"] = True
-                    log_message("[VEZÉRLÉS] RENDSZER ZÁROLVA: Túl sok egymás utáni automata parancs (10).")
-                    if action == "START":
-                        return False
+                log_after = "[VEZÉRLÉS] Parancs blokkolva: A vezérlő biztonsági zárolás (lockdown) alatt áll."
+                blocked = True
             else:
-                shared_state["consecutive_auto_commands"] = 0
-                
-            ts.append(now)
+                import time
+                now = time.time()
+                ts = shared_state.get("transition_timestamps", [])
+                ts = [t for t in ts if now - t < 40]
+                shared_state["transition_timestamps"] = ts
+
+                recent_20s = [t for t in ts if now - t < 20]
+                if len(recent_20s) >= 2 and not (is_manual_hard_stop or is_safety_stop):
+                    shared_state["cooldown_until"] = now + 20
+                    log_after = "[VEZÉRLÉS] Parancs blokkolva: Túl gyakori kapcsolás (cooldown)."
+                    blocked = True
+                elif len(ts) >= 4 and not (is_manual_hard_stop or is_safety_stop):
+                    shared_state["lockdown_active"] = True
+                    log_after = "[VEZÉRLÉS] Parancs blokkolva: 40 mp-en belüli 5. kapcsolás, RENDSZER ZÁROLVA."
+                    blocked = True
+                else:
+                    if not (is_manual_hard_stop or is_manual_start):
+                        # 5 perces mozgó időablak (a transition_timestamps 40 mp-es
+                        # mintájára): csak az 5 percen belüli automata parancsok
+                        # számítanak -- így egy hosszú távon zavartalanul futó
+                        # automatizmus nem gyűjt fel örökre "gyanús" mennyiséget,
+                        # de a kórosan gyakori (percenkénti/gyakoribb) pörgést elkapja.
+                        acts = shared_state.get("auto_command_timestamps", [])
+                        acts = [t for t in acts if now - t < 300]
+                        acts.append(now)
+                        shared_state["auto_command_timestamps"] = acts
+                        if len(acts) >= 10:
+                            shared_state["lockdown_active"] = True
+                            log_after = "[VEZÉRLÉS] RENDSZER ZÁROLVA: Túl sok (10) automata parancs 5 percen belül."
+                            if action == "START":
+                                blocked = True
+                    else:
+                        shared_state["auto_command_timestamps"] = []
+
+                    ts.append(now)
+
+        if log_after:
+            log_message(log_after)
+
+        if blocked:
+            return False
 
         await ble_command_queue.put(packet)
         return True
@@ -979,7 +997,7 @@ async def run_charge_controller():
 
         # 2. Ütemezett időablak fix áramkorláttal (Prioritás BE)
         elif mode == "schedule" and in_interval and override_auto:
-            if not charging_active and last_sent_action != "START":
+            if not charging_active and last_sent_action != "START" and not pull_plug:
                 start_amps = target_amps
                 log_message(f"[VEZÉRLÉS] Ütemezési időablak aktív (Prioritás BE). Töltés indítása ({start_amps}A)...")
                 start_payload = bytearray(47)
@@ -1037,7 +1055,7 @@ async def run_charge_controller():
         elif use_solar_auto_rules:
             # --- INDÍTÁSI FELTÉTEL ---
             if not charging_active and last_sent_action != "START":
-                if battery_soc >= start_soc:
+                if battery_soc >= start_soc and not pull_plug:
                     start_amps = charger_max_amps
                     log_message(
                         f"[VEZÉRLÉS] Solar Auto feltételek teljesültek (Akku SoC: {battery_soc}% >= {start_soc}%). Töltés INDÍTÁSA ({start_amps}A)...")
