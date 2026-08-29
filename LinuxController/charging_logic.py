@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 from bleak import BleakClient, BleakScanner
 from pysolarmanv5 import PySolarmanV5
@@ -130,50 +131,64 @@ def copy_packet_with_new_cmd(packet, new_cmd_id):
 
 # Persistent inverter connection
 _persistent_inverter = None
+# A Watchdog a run_inverter_polling() taszkot task.cancel()-lel szakítja meg 30 mp
+# néma PONG után -- ez viszont csak az asyncio.Task-ot törli, a mögötte ténylegesen
+# futó OS-szálat (asyncio.to_thread) NEM tudja megszakítani. Ha a hálózat tartósan
+# akadozik, ez ciklusonként egy újabb, tovább futó "zombi" szálat hagyhat hátra, és
+# ezek szinkronizáció nélkül nyúlnának a közös _persistent_inverter-hez -- ez a lock
+# védőhálóként biztosítja, hogy egyszerre csak egy szál használja a kapcsolatot.
+_inverter_lock = threading.Lock()
 
 
 def fetch_inverter_data_blocking():
     """Inverter telemetria adatainak szinkron lekérdezése."""
     global _persistent_inverter
 
-    if _persistent_inverter is None:
-        log_message(f"Deye Inverter kapcsolat felépítése: {INVERTER_IP}:{INVERTER_PORT} (S/N: {LOGGER_SERIAL})...")
+    with _inverter_lock:
+        if _persistent_inverter is None:
+            log_message(f"Deye Inverter kapcsolat felépítése: {INVERTER_IP}:{INVERTER_PORT} (S/N: {LOGGER_SERIAL})...")
+            try:
+                # Explicit, a Watchdog 30 mp-es türelmi ideje alá eső socket-timeout
+                # (a könyvtár alapértelmezett 60 mp-e nélküle túl hosszú lenne) --
+                # így egy elakadt lekérdezés magától, még a Watchdog kényszerített
+                # task.cancel()-je előtt hibával tér vissza, nem hagy hátra zombi szálat.
+                _persistent_inverter = PySolarmanV5(
+                    INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT,
+                    auto_reconnect=True, socket_timeout=15)
+            except Exception as e:
+                log_message(f"Deye Inverter kapcsolat hiba: {e}")
+                raise
+
         try:
-            _persistent_inverter = PySolarmanV5(INVERTER_IP, LOGGER_SERIAL, port=INVERTER_PORT, auto_reconnect=True)
+            pv_regs = _persistent_inverter.read_holding_registers(register_addr=672, quantity=2)
+            pv_power = sum(pv_regs)  # PV1 and PV2 power, sum them to get pv_power
+            grid_power_internal = to_signed_16(
+                _persistent_inverter.read_holding_registers(register_addr=607, quantity=1)[0])
+            grid_power_external = to_signed_16(
+                _persistent_inverter.read_holding_registers(register_addr=619, quantity=1)[0])
+            battery_soc = _persistent_inverter.read_holding_registers(register_addr=588, quantity=1)[0]
+            ups_load_power = _persistent_inverter.read_holding_registers(register_addr=643, quantity=1)[0]
+            battery_power = to_signed_16(_persistent_inverter.read_holding_registers(register_addr=590, quantity=1)[0])
+
+            # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
+            charger_power = max(0, grid_power_external - grid_power_internal)
+
+            return {
+                "grid_power": grid_power_external,
+                "battery_soc": battery_soc,
+                "ups_load_power": ups_load_power,
+                "pv_power": pv_power,
+                "battery_power": battery_power,
+                "charger_power": charger_power
+            }
         except Exception as e:
-            log_message(f"Deye Inverter kapcsolat hiba: {e}")
+            try:
+                if _persistent_inverter is not None:
+                    _persistent_inverter.disconnect()
+            except Exception:
+                pass
+            _persistent_inverter = None
             raise
-
-    try:
-        pv_regs = _persistent_inverter.read_holding_registers(register_addr=672, quantity=2)
-        pv_power = sum(pv_regs)  # PV1 and PV2 power, sum them to get pv_power
-        grid_power_internal = to_signed_16(
-            _persistent_inverter.read_holding_registers(register_addr=607, quantity=1)[0])
-        grid_power_external = to_signed_16(
-            _persistent_inverter.read_holding_registers(register_addr=619, quantity=1)[0])
-        battery_soc = _persistent_inverter.read_holding_registers(register_addr=588, quantity=1)[0]
-        ups_load_power = _persistent_inverter.read_holding_registers(register_addr=643, quantity=1)[0]
-        battery_power = to_signed_16(_persistent_inverter.read_holding_registers(register_addr=590, quantity=1)[0])
-
-        # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
-        charger_power = max(0, grid_power_external - grid_power_internal)
-
-        return {
-            "grid_power": grid_power_external,
-            "battery_soc": battery_soc,
-            "ups_load_power": ups_load_power,
-            "pv_power": pv_power,
-            "battery_power": battery_power,
-            "charger_power": charger_power
-        }
-    except Exception as e:
-        try:
-            if _persistent_inverter is not None:
-                _persistent_inverter.disconnect()
-        except Exception:
-            pass
-        _persistent_inverter = None
-        raise
 
 
 async def run_inverter_polling():
