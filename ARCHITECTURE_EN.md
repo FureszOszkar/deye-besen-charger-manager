@@ -41,7 +41,7 @@ The core loops run inside an **asynchronous event loop (Python `asyncio`)**, whi
 ```
 
 ### A) Thread-Safe State Management (`shared_state`)
-Since the Web Server (HTTP thread) and the `asyncio` loop (main thread) run concurrently, data is shared via a single global Python dictionary called `shared_state`. To prevent race conditions, all read/write accesses to this dictionary are synchronized using a mutex (`state_lock = threading.Lock()`).
+Since the Web Server (HTTP thread) and the `asyncio` loop (main thread) run concurrently, data is shared via a single global Python dictionary called `shared_state`. To prevent race conditions, all read/write accesses to this dictionary are synchronized using a mutex (`state_lock = threading.RLock()` — re-entrant, so the same thread may re-acquire it while already holding it). `log_message()` itself acquires this lock, so with a plain `Lock` calling `log_message()` while holding `state_lock` self-deadlocks the whole event loop — see the 2026-08-13 entry.
 
 ---
 
@@ -50,7 +50,7 @@ Since the Web Server (HTTP thread) and the `asyncio` loop (main thread) run conc
 Upon startup, the `main()` function launches several async tasks in parallel:
 
 ### 1. `run_inverter_polling()`
-* **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds. The connection is now persistent (using a global _persistent_inverter), and it disconnects and resets only if a socket/Modbus error occurs, thus avoiding socket memory leaks.
+* **Task:** Connects to the Deye hybrid inverter's Wi-Fi stick (Solarman LSW-3 Logger) via Modbus RTU over TCP every 10 seconds. The connection is persistent: exactly **one** `PySolarmanV5` instance (global `_persistent_inverter`, guarded by `_inverter_lock`), created with `auto_reconnect=False` and a 10-second `socket_timeout`. The library's internal reconnection is deliberately disabled because it left orphaned instances (connection + reader thread + pipe pair) behind until the file descriptors ran out (see the 2026-09-19 entry). On any error `_close_inverter()` closes and discards the instance and the next call builds a fresh one; if an existing connection fails with an instant connection error, it is rebuilt once immediately within the same call.
 * **Library:** `pysolarmanv5` (connecting on TCP port `8899`).
 * **Threading Safety (Asynchronization):** Since `pysolarmanv5` Modbus polling contains synchronous blocking network calls, these operations are isolated inside a blocking helper `fetch_inverter_data_blocking()` and run in a separate background worker thread using `asyncio.to_thread()`. This prevents network glitches on the Deye logger stick from blocking the main event loop and causing Bluetooth timeout disconnects.
 * **Queried Registers:**
@@ -275,6 +275,24 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 ---
 
 ## 7. Recent Fixes and Hardening
+
+### 2026-09-19
+
+Fix for orphaned connections to the inverter (Deye WiFi logger). **Symptom (2026-09-18):** after 19 days of uptime the dashboard and Android widget became unreachable and the inverter status turned red, while the BLE heartbeat kept running; the log showed `[Errno 24] Too many open files` every ten seconds (the program could no longer open new sockets — neither toward the inverter nor for the web server). `htop` showed roughly 375 threads in a single process.
+
+**Diagnosis (measured on the live process, with a py-spy dump):** 41-42 ESTABLISHED connections to the logger (`:8899`) instead of one; of 198 open descriptors, 126 were pipes (63 pipe pairs) and 70 sockets; 63 threads were sitting in `pysolarmanv5._data_receiver` (the library's reader thread) and 3 in the `multiprocessing` queue `_feed` thread. For each `PySolarmanV5` instance the library creates a `multiprocessing.Queue` (2 pipe descriptors), a socket and a reader thread — so roughly 63 instances were alive instead of one. The web server was not leaking. The orphaned connections also occupied the logger's very few free connection slots, which explains the frequent "red inverter" state and the need for logger resets; in the end the descriptors ran out (systemd default: 1024). The new process accumulated 63 orphans within a few hours of the 16:53 restart, so the leak is event-driven (logger outage, slow response, reset), not a function of uptime.
+
+**Mechanism (reproduced with a local test):** `fetch_inverter_data_blocking()` created the connection with `PySolarmanV5(..., auto_reconnect=True)`. When the logger drops the connection, the library's *reader thread* calls `_reconnect()`, which can block on creating the new socket for up to `socket_timeout` seconds. If our query fails in the meantime and the error handling calls `disconnect()` and drops the instance, `_reconnect()` finishes by undoing the shutdown signal (`_reader_exit.clear()`) and starts a new socket and a new reader thread on an instance nobody references anymore — the orphan runs forever and reconnects on its own whenever the peer drops it. Each orphan takes up more logger slots, causing more timeouts (a self-reinforcing loop). Measured against a fake logger server (localhost, slowed reconnection), after 6 drop cycles: with the previous setting (`auto_reconnect=True`, `socket_timeout=60`) and the most recent one (`socket_timeout=15`) alike, 6 live orphan connections and 6 running reader threads remained — exactly +1 per cycle; with the fixed setting, 0 and 0. The test also showed that the 2026-08-14 timeout change (60 → 15 s) made no difference to the leak.
+
+**Correction to the 2026-08-14 entry:** for the 2026-08-14 incident (~30 program instances in `htop`, decryption error on the dashboard/widget) we identified the root cause as the combined limitation of the Watchdog's `task.cancel()` and `asyncio.to_thread()`, and fixed that (`socket_timeout=15`, `_inverter_lock`). That limitation is real, but based on today's measurements the symptoms back then were most likely this same orphaned-instance leak — the earlier fix did not cover it.
+
+* **`auto_reconnect=False`** (`charging_logic.py`, `_open_inverter()`): the library's internal reconnection is gone, so there is no orphan instance that can be resurrected. The program's own error handling already builds a new instance for the next call, so the built-in reconnection was redundant.
+* **`socket_timeout` 15 → 10 s:** the worst case within one call is connect (≤10 s) + one read (≤10 s) = 20 s, well under the Watchdog's 30 s threshold.
+* **Immediate rebuild on a closed connection:** if a read on an existing instance fails with an instant connection error (`NoSocketAvailableError`, `ConnectionError`, `AttributeError`), the instance is closed and rebuilt once within the same call, so a dropped persistent connection no longer flashes the inverter status red. There is deliberately no retry on a timeout (it would increase the call's running time).
+* **Reliable teardown** (`_close_inverter()`): after `disconnect()` it waits for the reader thread to stop and also closes the instance's `multiprocessing.Queue` (freeing the pipe descriptors), but only once the reader thread is no longer running.
+* **Watchdog resource monitoring** (`main.py`, `fd_census()`): every 10 minutes the Watchdog logs one summary line with the open descriptors broken down by type (`[WATCHDOG] Erőforrások: fd=… (socket=…, cső=…, egyéb=…), szál=…` — the logged text is in Hungarian; `cső` = pipe, `egyéb` = other, `szál` = threads), at 300 the line becomes a `[WATCHDOG WARNING]`, and above 700 the Watchdog logs a critical message and exits with `os._exit(1)` so that systemd (`Restart=on-failure`) restarts the process before the 1024 limit is reached. Linux only (`/proc/self/fd`); elsewhere, e.g. on Windows, it skips itself.
+
+**Not proven / open:** the BLE side (a long Bluetooth outage, e.g. a dropped USB receiver, and the reconnection cycle during it) cannot be tested without hardware; by reading, it looks correct (each attempt builds a new `BleakClient`, and the `finally` branch calls `client.disconnect()`), and the BLE side showed no leak in today's dump. The Watchdog's resource counter will show this over time, by source.
 
 ### 2026-08-14
 

@@ -41,7 +41,7 @@ Az alapvető ciklusok egy **aszinkron eseményhurokban (Python `asyncio`)** futn
 
 ### 1.1 A Megosztott Állapot (Shared State) Tervezése
 A `shared_state` dictionary egyetlen igazságforrásként (single source of truth) szolgál mind a Deye lekérdezések, mind a webes felület, mind a töltési logika felé.
-*   **Szálbiztonság (Thread-Safety):** Mivel a HTTP szál beállításokat írhat (pl. "Napelemes módról Állandó módra váltás"), az eseményhurok pedig olvassa és frissíti a szenzoradatokat, az összes `shared_state` hozzáférést a `state_lock` (egy `threading.Lock`) védi a versenyhelyzetek (race conditions) elkerülése érdekében.
+*   **Szálbiztonság (Thread-Safety):** Mivel a HTTP szál beállításokat írhat (pl. "Napelemes módról Állandó módra váltás"), az eseményhurok pedig olvassa és frissíti a szenzoradatokat, az összes `shared_state` hozzáférést a `state_lock` (egy `threading.RLock`, tehát ugyanaz a szál újra beléphet, ha már fogja) védi a versenyhelyzetek (race conditions) elkerülése érdekében. A `log_message()` maga is megfogja ezt a zárat, ezért **nem szabad `state_lock` alatt `log_message()`-et hívni egy sima `Lock`-kal** — lásd a 2026-08-13-i bejegyzést.
 
 ---
 
@@ -49,9 +49,10 @@ A `shared_state` dictionary egyetlen igazságforrásként (single source of trut
 
 Az `asyncio` futtatókörnyezetben három párhuzamos taszk fut végtelen ciklusban:
 
-### 2.1 `poll_deye_inverter()`
-*   **Gyakoriság:** Körülbelül ~5 másodpercenként fut.
-*   **Feladat:** TCP-n keresztül (IP / Port 8899) Modbus RTU kereteket küld a Solarman Logger-nek (LSW-3).
+### 2.1 `run_inverter_polling()`
+*   **Gyakoriság:** 10 másodpercenként fut.
+*   **Feladat:** TCP-n keresztül (IP / Port 8899) Modbus RTU kereteket küld a Solarman Logger-nek (LSW-3), a `pysolarmanv5` könyvtárral. A blokkoló lekérdezés (`fetch_inverter_data_blocking()`) `asyncio.to_thread()`-del háttérszálon fut, hogy egy hálózati fennakadás ne blokkolja az eseményhurkot.
+*   **Kapcsolatkezelés (fontos):** a program **egyetlen, tartós** `PySolarmanV5` kapcsolatot tart fenn (`_persistent_inverter`), amit az `_inverter_lock` véd. A példány `auto_reconnect=False`-szal és 10 mp-es `socket_timeout`-tal jön létre: a könyvtár belső újracsatlakozását szándékosan kikapcsoltuk, mert az elárvult példányokat (kapcsolat + olvasó szál + csőpár) hagyott hátra, amíg el nem fogytak a fájlleírók (lásd a 2026-09-19-i bejegyzést). Hibánál a `_close_inverter()` lezárja és eldobja a példányt, a következő hívás újat épít; ha a meglévő kapcsolat azonnali kapcsolat-hibával mondja fel a szolgálatot, ugyanabban a hívásban egyszer azonnal újraépít.
 *   **Adatok:** Kiolvassa az akkumulátor SoC-t (State of Charge), feszültséget, áramerősséget, hálózati (Grid) teljesítményt (Import/Export) és a Ház (UPS) fogyasztását. Az adatokat visszírja a `shared_state`-be.
 
 ### 2.2 `run_charge_controller()`
@@ -218,6 +219,11 @@ A `main.py`-ban található egy dedikált végtelen ciklus, amely 5 másodpercen
 *   Ha a `web_thread` teljesen elhalt (`is_alive() == False`), a Watchdog biztonságosan újraindítja csak azt a szálat.
 *   Ha a szál él, de 30 másodpercig nincs `"web"` PONG (ténylegesen befagyott, az elfogadó hurok nem pörög), a Watchdog **a teljes folyamatot kilépteti** (`os._exit(1)`) — mivel egy natív Python szálat nem lehet biztonságosan kívülről megszakítani, ez az egyetlen megbízható helyreállítási út. A `deye-besen-controller.service`-ben lévő `Restart=on-failure` + `RestartSec=5` ezt automatikusan, ember nélkül újraindítja.
 
+**Erőforrás-figyelés (nyitott fájlleírók):** egy szivárgó forrás (elárvult kapcsolatok, csövek, szálak) lassan elfogyasztja a folyamat fájlleíró-keretét (systemd alapértelmezés: 1024). Ha elfogy, a program nem tud új socketet nyitni (inverter-kapcsolat, webszerver), de a már meglévő BLE-kapcsolat még él — kívülről fagyásnak tűnik, és a Watchdog PONG-alapú ellenőrzése sem észleli. Ezért a Watchdog 5 mp-es ciklusa Linuxon (`/proc/self/fd` alapján; máshol, pl. Windowson, magától kihagyja) a webszerver-ellenőrzés mellett megszámolja a nyitott leírókat is (`fd_census()`, `main.py`):
+*   **10 percenként** egy összesítő sor kerül a naplóba típus szerinti bontásban: `[WATCHDOG] Erőforrások: fd=… (socket=…, cső=…, egyéb=…), szál=…`. Bármilyen szivárgás (inverter, BLE, bármi) így idősorban, forrás szerint látszik a `journalctl`-ben, kézi mérés nélkül.
+*   **300 fölött** az összesítő sor `[WATCHDOG WARNING]` szintű.
+*   **700 fölött** a Watchdog kritikus üzenetet naplóz, majd `os._exit(1)`-gyel kilépteti a folyamatot, amit a `systemd` (`Restart=on-failure`) újraindít — még a 1024-es korlát elérése előtt, így a kiesés órákra korlátozódik napok helyett.
+
 ---
 
 ## 7. Legutóbbi javítások
@@ -264,6 +270,24 @@ Két, egymástól független hibakör javítása: a webszerver szálfelhalmozód
     1.  **`html`/`body` `overflow-x` felcserélése:** az eredeti `html, body { overflow-x: hidden; }` szabály mindkét elemre explicit overflow-értéket adott, ami a CSS specifikáció szerint blokkolta a `body`→`html` felszivárgást, és a `body`-t önálló görgetési dobozzá tette (dupla görgetősáv — a Mérések oldalon kétszer kellett felfelé húzni a lapot). A javítás: `overflow-x: hidden` kizárólag a `body`-n maradt (a `html`-ről levéve) — így a szabályos felszivárgás érvényesül (egyetlen görgetési doboz), és a `body` közvetlenül elfojtja a saját vízszintes túlcsordulását is (megelőzve, hogy a böngésző kitágítsa az elrendezési viewportot egy túlcsorduló elem miatt).
     2.  **`.phase-table { table-layout: fixed !important; }`** (mobil media query): a Kézi töltés alatti FÁZIS/FESZÜLTSÉG/ÁRAM táblázat (`#active-charging-view`-ban) nem respektálta az összenyomott flex-konténerét (`min-width: 0`) — egy sima `<table>` nem megy a tartalma természetes minimum-szélessége alá `table-layout: fixed` nélkül, így 403px-re nőtt egy 344px-es dobozban.
     3.  **`.telemetry-status-rows > div > div:last-child .tooltip-text`** jobbra-igazítás (mobil media query): a "Belső hőfok" és "Állapot" sorok tooltip-jei (a `.metric-grid`-en kívül, egy külön `justify-content: space-between` szekcióban) nem kapták meg a `metric-grid`-nél már meglévő jobbra-igazított tooltip kezelést (`right: -10px; left: auto`), ezért az alapértelmezett középre-igazítással a jobb oldali elemek tooltip-doboza (220px széles) kilógott a képernyőről. A `.telemetry-status-rows` class hozzáadásával ez a wrapper is bekerült a jobbra-igazító szabály hatálya alá.
+
+### 2026-09-19
+
+Az inverter (Deye WiFi logger) felé menő kapcsolatok elárvulásának javítása. **Tünet (2026-09-18):** 19 napnyi futás után a felület és az Android-widget elérhetetlenné vált, az inverter-állapot piros lett, miközben a BLE-heartbeat még ment; a naplóban tízmásodpercenként `[Errno 24] Too many open files` ismétlődött (a program nem tudott új socketet nyitni, se az inverter, se a webszerver felé). A htop egyetlen folyamat ~375 szálát mutatta.
+
+**Diagnózis (élő folyamaton mérve, py-spy dumppal):** a logger (`:8899`) felé 41-42 ESTABLISHED kapcsolat volt nyitva egy helyett; a 198 nyitott leíróból 126 cső (63 csőpár) és 70 socket; 63 szál állt a `pysolarmanv5._data_receiver`-ben (a könyvtár olvasó szála), 3 a `multiprocessing` sor `_feed` szálában. A könyvtár minden `PySolarmanV5` példányhoz egy `multiprocessing.Queue`-t (2 csőleíró), egy socketet és egy olvasó szálat hoz létre — tehát kb. 63 példány maradt életben egy helyett. A webszerver nem szivárgott. Az elárvult kapcsolatok a logger kevés szabad kapcsolati helyét is elfoglalták, ami a gyakori "piros inverter" állapotot és a logger-resetek szükségességét magyarázza; a végén a leírók fogytak el (systemd alapértelmezés: 1024). Az új folyamat a 16:53-as újraindítás óta néhány óra alatt 63 árvát gyűjtött, tehát a szivárgás eseményvezérelt (logger-kiesés, lassú válasz, reset), nem az üzemidő hosszától függ.
+
+**Mechanizmus (helyi teszttel reprodukálva):** a `fetch_inverter_data_blocking()` `PySolarmanV5(..., auto_reconnect=True)`-val hozta létre a kapcsolatot. Ha a logger eldobja a kapcsolatot, a könyvtár *olvasó szála* hívja a `_reconnect()`-ot, ami az új socket létrehozásán akár `socket_timeout` másodpercig blokkol. Ha közben a mi lekérdezésünk hibával tér vissza, és a hibakezelés `disconnect()`-et hív majd eldobja a példányt, a `_reconnect()` a végén visszavonja a leállítási jelzést (`_reader_exit.clear()`), új socketet és új olvasó szálat indít egy már senki által nem hivatkozott példányon — ez az árva örökre fut, és a peer eldobásakor magától újra kapcsolódik. Minden árva több helyet foglal a loggeren, ami több időtúllépést okoz (önerősítő kör). Hamis logger-szerverrel (localhost, lassított újracsatlakozással) mérve, 6 eldobási ciklus után: a korábbi (`auto_reconnect=True`, `socket_timeout=60`) és a legutóbbi (`socket_timeout=15`) beállításnál egyaránt 6 élő árva kapcsolat és 6 futó olvasó szál maradt, ciklusonként pontosan +1; a javított beállításnál 0 és 0. A teszt azt is megmutatta, hogy az aug. 14-i időzítés-változtatás (60 → 15 mp) a szivárgáson nem változtatott.
+
+**Kiigazítás a 2026-08-14-i bejegyzéshez:** az aug. 14-i esetben (~30 programpéldány a htopban, titkosítási hiba a felületen/widgetben) a gyökérokot a Watchdog `task.cancel()` és `asyncio.to_thread()` együttes korlátjában láttuk, és arra adtunk javítást (`socket_timeout=15`, `_inverter_lock`). Ez a korlát valós, de a mostani mérések alapján az akkori tünetegyüttes nagy valószínűséggel ugyanez az árva-példány szivárgás volt — az akkori javítás ezt nem fedte le.
+
+*   **`auto_reconnect=False`** (`charging_logic.py`, `_open_inverter()`): megszűnik a könyvtár belső újracsatlakozása, így nincs feltámasztható árva példány. A program hibakezelése amúgy is új példányt épít a következő hívásra, tehát a beépített újracsatlakozás felesleges volt.
+*   **`socket_timeout` 15 → 10 mp:** a legrosszabb eset egy hívásban kapcsolódás (≤10 mp) + egy olvasás (≤10 mp) = 20 mp, jóval a Watchdog 30 mp-es határa alatt.
+*   **Azonnali újraépítés lezárt kapcsolatnál:** ha a meglévő példányon az olvasás azonnali kapcsolat-hibával (`NoSocketAvailableError`, `ConnectionError`, `AttributeError`) hibázik, a példány lezárása után egyszer, ugyanabban a hívásban új példánnyal újrapróbál, így egy eldobott tartós kapcsolat nem villantja pirosra az inverter-állapotot. Időtúllépésnél szándékosan nincs újrapróbálkozás (nem nő a hívás időigénye).
+*   **Megbízható lezárás** (`_close_inverter()`): a `disconnect()` után megvárja az olvasó szál leállását, és a példány `multiprocessing.Queue`-ját is lezárja (csőleírók felszabadítása), de csak ha az olvasó szál már nem fut.
+*   **Watchdog erőforrás-figyelés** (`main.py`, `fd_census()`): lásd a 6.6 szakasz frissített leírását.
+
+**Nem bizonyított / nyitott:** a BLE-oldal (hosszú Bluetooth-kiesés, pl. leesett USB-vevő alatti újracsatlakozási ciklus) hardver nélkül nem tesztelhető; olvasás alapján rendben van (minden próbálkozás új `BleakClient`, a `finally` ág `client.disconnect()`-et hív), de a mostani dumpban a BLE nem mutatott szivárgást. A Watchdog erőforrás-számlálója ezt idősorban, forrás szerint fogja mutatni.
 
 ### 2026-08-14
 

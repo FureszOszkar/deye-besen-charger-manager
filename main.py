@@ -15,6 +15,44 @@ from charging_logic import (
 )
 from simulation import run_simulation_telemetry, console_simulation_input
 
+# --- ERŐFORRÁS-FIGYELÉS (fájlleírók) ---
+# Egy szivárgó forrás (elárvult kapcsolatok, csövek, szálak) lassan elfogyasztja a
+# folyamat fájlleíró-keretét (systemd alapértelmezés: 1024); ha elfogy, a program nem
+# tud új socketet nyitni (inverter-kapcsolat, webszerver), de a BLE még él -- kívülről
+# fagyásnak tűnik. A Watchdog ezért figyeli a nyitott leírók számát: rendszeresen
+# naplózza forrás szerint, és a keret elfogyása előtt kontrolláltan újraindít.
+FD_CENSUS_INTERVAL_S = 600     # ennyi másodpercenként egy összesítő sor a naplóba
+FD_WARN_LIMIT = 300            # e fölött az összesítő sor figyelmeztetés
+FD_CRITICAL_LIMIT = 700        # e fölött kontrollált újraindítás (a systemd újraindítja)
+
+
+def fd_census():
+    """A nyitott fájlleírók száma és típus szerinti bontása (csak Linuxon, /proc alapján).
+
+    Visszatérés: (összes, {"socket": n, "cső": n, "egyéb": n}) vagy None, ha nem elérhető."""
+    fd_dir = "/proc/self/fd"
+    if not os.path.isdir(fd_dir):
+        return None
+    kinds = {"socket": 0, "cső": 0, "egyéb": 0}
+    total = 0
+    try:
+        names = os.listdir(fd_dir)
+    except OSError:
+        return None
+    for name in names:
+        try:
+            target = os.readlink(os.path.join(fd_dir, name))
+        except OSError:
+            continue  # a listázás közben lezáródott leíró (pl. maga a könyvtárleíró)
+        total += 1
+        if target.startswith("socket:"):
+            kinds["socket"] += 1
+        elif target.startswith("pipe:"):
+            kinds["cső"] += 1
+        else:
+            kinds["egyéb"] += 1
+    return total, kinds
+
 # --- FŐ PROGRAM BELÉPÉSI PONT ---
 
 async def main():
@@ -80,6 +118,7 @@ async def main():
     # időbélyeget azonnal frissre állítanánk (ahogy korábban történt), egy elakadt megszakítás
     # 30 másodpercenként újra "friss"-nek tűnne, miközben a régi feladat zombiként tovább futhat.
     cancel_pending = {}
+    last_fd_census_log = 0.0  # az utolsó erőforrás-összesítő sor időpontja (0 = az első ciklusban azonnal naplózunk)
     while True:
         await asyncio.sleep(5)
         current_time = time.time()
@@ -143,6 +182,26 @@ async def main():
             if current_time - last_web_pong > 30:
                 log_message("[WATCHDOG CRITICAL] Befagyás: A webszerver szál 30 másodperce nem küldött PONG jelet! Natív szálat Python nem tud biztonságosan kívülről megszakítani -- a teljes folyamat kényszerített leállítása, hogy a systemd (Restart=on-failure) tisztán újraindítsa.")
                 os._exit(1)
+
+        # 4. Erőforrás-figyelés: a nyitott fájlleírók száma (csak Linuxon). Bármilyen szivárgás
+        # (inverter-kapcsolat, BLE, bármi) forrás szerint látszik a naplóban, és a keret (1024)
+        # elfogyása előtt a folyamat kontrolláltan újraindul, ugyanazzal a mintával, mint a
+        # befagyott webszerver-szálnál (os._exit + systemd Restart=on-failure).
+        census = fd_census()
+        if census is not None:
+            fd_total, fd_kinds = census
+            summary = (f"fd={fd_total} (socket={fd_kinds['socket']}, cső={fd_kinds['cső']}, "
+                       f"egyéb={fd_kinds['egyéb']}), szál={threading.active_count()}")
+            if fd_total > FD_CRITICAL_LIMIT:
+                log_message(f"[WATCHDOG CRITICAL] Túl sok nyitott fájlleíró: {summary} (határ: {FD_CRITICAL_LIMIT}). "
+                            "Valószínű erőforrás-szivárgás -- a teljes folyamat kontrollált újraindítása, hogy a systemd "
+                            "(Restart=on-failure) tisztán újraindítsa, mielőtt elfogyna a leíró-keret.")
+                sys.stdout.flush()
+                os._exit(1)
+            if current_time - last_fd_census_log >= FD_CENSUS_INTERVAL_S:
+                last_fd_census_log = current_time
+                level = "[WATCHDOG WARNING]" if fd_total > FD_WARN_LIMIT else "[WATCHDOG]"
+                log_message(f"{level} Erőforrások: {summary}")
 
 
 def run_program():
