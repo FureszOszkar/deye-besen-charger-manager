@@ -444,10 +444,7 @@ async def run_ble_client():
                     if ble_state == "LOGGED_IN" and time.time() - last_rx_time > 15.0:
                         log_message(
                             "-> [WATCHDOG TIMEOUT] Nincs beérkező telemetria 15 másodperce. Kapcsolat kényszerített lezárása...")
-                        try:
-                            await client.disconnect()
-                        except Exception:
-                            pass
+                        await safe_ble_disconnect(client)
                         raise Exception("Telemetria timeout (15s)")
                     try:
                         # Ha érkezik parancs a sorba, azonnal kiküldjük
@@ -474,10 +471,7 @@ async def run_ble_client():
             except Exception as e:
                 raise e
             finally:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
+                await safe_ble_disconnect(client)
 
         except Exception as e:
             with state_lock:
@@ -498,16 +492,29 @@ async def run_ble_client():
 last_rx_time = 0.0
 
 # BLE kezelés logika ide kerül
+async def safe_ble_disconnect(client, timeout=12.0):
+    """A BLE-kliens lezárása időkorláttal; sosem dob kivételt (a hibát/időtúllépést naplózza).
+
+    A bleak BlueZ-háttere a D-Bus "Disconnect" hívást időkorlát nélkül várja meg (csak az
+    utána következő jelzésre vár saját 10 mp-es korláttal) -- ha a BlueZ nem válaszol (pl.
+    leesett USB BT-vevő), a lezárás elakadhat, és a Watchdog csak ~30 mp után, a taszk
+    kényszerített megszakításával lépne közbe. A 12 mp szándékosan nagyobb a bleak saját
+    10 mp-es korlátjánál: egy egészséges, csak lassú lezárást így nem szakítunk meg, a
+    bleak saját takarítása lefut, a mi korlátunk csak a nem korlátozott hívást védi.
+    A CancelledError (Watchdog-megszakítás) nem Exception-leszármazott, ezért átmegy."""
+    try:
+        await asyncio.wait_for(client.disconnect(), timeout=timeout)
+    except Exception as e:
+        log_message(f"-> [BLE DISCONNECT TIMEOUT/ERROR] A kapcsolat lezárása nem sikerült tisztán: {e!r}")
+
+
 async def safe_ble_write(client, char, data, response=True, timeout=5.0):
     try:
         await asyncio.wait_for(client.write_gatt_char(char, data, response=response), timeout=timeout)
         return True
     except Exception as e:
         log_message(f"-> [BLE WRITE TIMEOUT/ERROR] Csatorna: {char}, Hiba: {e}. Kapcsolat kényszerített lezárása...")
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await safe_ble_disconnect(client)
         raise e
 
 
@@ -517,10 +524,7 @@ async def safe_ble_start_notify(client, char, callback, timeout=5.0):
         return True
     except Exception as e:
         log_message(f"-> [BLE NOTIFY TIMEOUT/ERROR] Csatorna: {char}, Hiba: {e}. Kapcsolat kényszerített lezárása...")
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await safe_ble_disconnect(client)
         raise e
 
 
