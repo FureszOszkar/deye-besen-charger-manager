@@ -79,6 +79,7 @@ Upon startup, the `main()` function launches several async tasks in parallel:
 ### 3. `run_charge_controller()`
 * **Task:** The main control loop runs every 5 seconds.
 * **Operation:** Reads telemetry from `shared_state`, evaluates active automation rules (Auto, Scheduled, Force), and pushes packets into the `ble_command_queue` when state changes occur.
+* **Connection condition (before the mode branching):** the charger (BLE) connection is required in every mode (`charger_connected`), while the inverter connection (`inverter_connected`) is required **only for the Solar Auto rules** (`use_solar_auto_rules`: Auto mode, a scheduled window without "Override Solar Auto", or outside a window with "Solar Auto after schedule" enabled), because only they decide from inverter data (SoC, grid and UPS power). Force (manual) mode and fixed-current scheduled charging (and the stop outside a window) run without the inverter. `use_solar_auto_rules` is therefore computed before the condition. Manual stop (`apply_with_stop`/`apply_with_restart`) already ran before the condition.
 * **Unified Solar Auto Rules:** The solar charging logic evaluates three protection rules sequentially and independently:
   1. *Grid Import Limit:* Charging stops if grid import exceeds the `stop_import_limit`.
   2. *Battery Stop SoC:* Charging stops if the home battery SoC drops below the `stop_soc` limit.
@@ -275,6 +276,15 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 ---
 
 ## 7. Recent Fixes and Hardening
+
+### 2026-09-20
+
+**Force and fixed-current scheduled charging without the inverter connection.** The user repeatedly could not start charging because the inverter (Deye WiFi logger) connection was red — although neither the battery nor the sun mattered to them. The logger drops out often in the evening (around 16-23 h, judging by the hourly error counts in the log), exactly when they usually charge, and resetting the logger was the only workaround. **Cause:** `run_charge_controller()` skipped the whole iteration (`continue`) before the mode branching whenever `not inverter_ok or not charger_ok` — which also blocked Force (manual) mode, fixed-current ("Override Solar Auto") scheduled charging and the stop outside a window, although none of them use inverter data. Only the Solar Auto rules use inverter data (`battery_soc`, grid and UPS power). Manual stop (`apply_with_stop`/`apply_with_restart`) already ran before the condition, which is why it worked.
+
+* **Split connection condition** (`charging_logic.py`): the charger (BLE) connection is required in every mode; the inverter connection only when `use_solar_auto_rules` is true. The `use_solar_auto_rules` computation (it depends only on the mode and the schedule) moved above the condition, with unchanged content. Solar Auto still makes no decisions from stale inverter data.
+* **Log line:** when a Force or fixed-current scheduled start happens without the inverter connection, a `[VEZÉRLÉS] Inverter-kapcsolat nélkül indult a töltés (…)` line is logged (the text is Hungarian: "charging started without the inverter connection").
+* **Protection level:** the Force and fixed-current scheduled branches never had software safety stops (house overload, grid import, low SoC), so this change does not reduce protection compared to a green inverter; without the inverter connection only the charger's own DLM protects in these modes. A Solar Auto session already running still gets no decisions during an inverter outage (an existing, unchanged limit).
+* **Verification:** an integration test against the real `run_charge_controller()` with stubbed `shared_state` and `ble_command_queue` (10 cases: Force, scheduled fixed, stop outside a window, Solar Auto, scheduled Solar Auto, red charger, green-inverter controls). On the unmodified code, Force start, fixed-current scheduled start and the stop outside a window sent **no** command without the inverter (the bug reproduced); after the change all three went out, and the other cases are unchanged.
 
 ### 2026-09-19
 

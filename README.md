@@ -157,6 +157,7 @@ Lehetővé teszi az olcsó éjszakai áramtarifák vagy meghatározott töltési
 
 ### 3. Kézi Kényszerített (Force) Mód
 Ezzel a móddal felülbírálhatsz minden automatizációt, és manuálisan adhatsz ki Start/Stop parancsokat, és állíthatod be az Amper értéket a csúszkával.
+*   **Inverter-kapcsolat nélkül is működik:** a Force mód és a fix áramú ("Solar Auto felülírása" bekapcsolt) ütemezett töltés nem használ inverter-adatot, ezért akkor is elindíthatod és leállíthatod őket, ha a Deye Wi-Fi logger kapcsolata éppen piros. A Solar Auto szabályok viszont továbbra is igénylik az invertert (az akku- és hálózati adatból döntenek), ezért azok addig szüneteltetik a döntéseket. A töltő (BLE) kapcsolata minden módban szükséges.
 *   **Kézi indítás (Start):** azonnal elindítja a töltést a beállított árammal. Amint a töltés befejeződik (pl. az autó tele lett, vagy kihúzták a kábelt), a kézi felülbírálás automatikusan megszűnik, és visszaáll a Solar/Ütemezett automatizmus.
 *   **Kézi Stop (Hard Stop):** azonnal leállítja a töltést, és **felfüggeszti az összes Solar/Ütemezett automatizmust**, amíg kézzel vissza nem vonod a piros "Visszavonás" gombbal.
 *   **Ideiglenes leállítás (Soft Stop):** leállítja az aktuális töltési munkamenetet, de nem függeszti fel a szabályokat. Ha később ismét teljesülnek a Solar Auto feltételek, a töltés automatikusan újraindulhat.
@@ -218,7 +219,7 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 
 A műszerfalon található egy beépített "Konzol" és "Hibadobozok", amelyek valós idejű visszajelzést adnak:
 *   **Sárga Figyelmeztetés:** Lehűlési (Cooldown) időzítő aktív (megakadályozza, hogy a Bluetooth parancsok túl gyorsan spammeljék a töltőt).
-*   **Piros Hiba:** Kapcsolódási problémák az Inverterrel (Modbus) vagy a Töltővel (BLE).
+*   **Piros Hiba:** Kapcsolódási problémák az Inverterrel (Modbus) vagy a Töltővel (BLE). Piros inverter esetén a Solar Auto döntések szünetelnek, de a Force és a fix áramú ütemezett töltés működik; piros töltő esetén semmilyen töltésvezérlés nem működik.
 *   **Piros Lockdown:** A biztonsági zárolás (Flapping védelem) aktiválódott, kézi feloldás szükséges.
 *   **Konzol kimenet:** Részletes hálózati és töltési eseményeket naplóz.
 

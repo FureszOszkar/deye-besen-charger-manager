@@ -795,8 +795,26 @@ async def run_charge_controller():
                     override_auto = window.get("override_auto", True)
                     break
 
-        # Ellenőrizzük a kapcsolatokat (csak ha nem szimulációról van szó)
-        if not sim_mode and (not inverter_ok or not charger_ok):
+        # Határozzuk meg, hogy a Solar Auto szabályokat kell-e alkalmaznunk. Ez csak a módtól és az
+        # ütemezéstől függ (nem inverter-adattól), ezért a kapcsolat-ellenőrzés ELŐTT számoljuk ki.
+        use_solar_auto_rules = False
+        if mode == "auto":
+            use_solar_auto_rules = True
+        elif mode == "schedule":
+            if in_interval:
+                if not override_auto:
+                    use_solar_auto_rules = True
+            else:
+                if schedule_solar_auto:
+                    use_solar_auto_rules = True
+
+        # Ellenőrizzük a kapcsolatokat (csak ha nem szimulációról van szó).
+        # A TÖLTŐ kapcsolata minden módban kötelező: parancsot csak rajta keresztül lehet küldeni.
+        # Az INVERTER kapcsolata csak a Solar Auto szabályoknál kell, mert csak ők döntenek inverter-adat
+        # (SoC, hálózati és UPS teljesítmény) alapján -- elavult adatból nem hozunk döntést. A Force (kézi)
+        # mód és a fix áramú ("Solar Auto felülírása") ütemezett töltés nem használ inverter-adatot, ezért
+        # az inverter (Wi-Fi logger) kiesése nem akadályozhatja az indításukat és leállításukat.
+        if not sim_mode and (not charger_ok or (use_solar_auto_rules and not inverter_ok)):
             # Kapcsolat nélkül nem tudunk biztonságosan parancsot végrehajtani
             continue
 
@@ -980,18 +998,7 @@ async def run_charge_controller():
         actual_action = "KEEP"
 
         # --- ÜZEMMÓD-ALAPÚ DÖNTÉSEK ---
-
-        # Határozzuk meg, hogy a Solar Auto szabályokat kell-e alkalmaznunk
-        use_solar_auto_rules = False
-        if mode == "auto":
-            use_solar_auto_rules = True
-        elif mode == "schedule":
-            if in_interval:
-                if not override_auto:
-                    use_solar_auto_rules = True
-            else:
-                if schedule_solar_auto:
-                    use_solar_auto_rules = True
+        # (a use_solar_auto_rules a kapcsolat-ellenőrzés előtt, fentebb került meghatározásra)
 
         # 1. Kényszerített (Force Charge) Mód
         if mode == "force":
@@ -1019,6 +1026,8 @@ async def run_charge_controller():
                 last_sent_action = "START"
                 start_command_time = current_time
                 actual_action = "START"
+                if not sim_mode and not inverter_ok:
+                    log_message("[VEZÉRLÉS] Inverter-kapcsolat nélkül indult a töltés (a Force mód nem használ inverter-adatot).")
                 with state_lock:
                     shared_state["manual_start_requested"] = False
                     shared_state["force_submode"] = "manual_start"
@@ -1079,6 +1088,8 @@ async def run_charge_controller():
                 last_sent_action = "START"
                 start_command_time = current_time
                 actual_action = "START"
+                if not sim_mode and not inverter_ok:
+                    log_message("[VEZÉRLÉS] Inverter-kapcsolat nélkül indult a töltés (a fix áramú ütemezett mód nem használ inverter-adatot).")
                 with state_lock:
                     shared_state["active_current_limit"] = target_amps
                     shared_state["started_by_controller"] = True

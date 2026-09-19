@@ -157,6 +157,7 @@ Time-based charging control with weekly scheduling, allowing you to take advanta
 
 ### 3. Force (Manual Override) Mode
 This mode lets you override all automation and manually issue Start/Stop commands, as well as set the current with the slider.
+*   **Works without the inverter connection:** Force mode and fixed-current scheduled charging ("Override Solar Auto" enabled) do not use inverter data, so you can start and stop them even while the Deye Wi-Fi logger connection is red. Solar Auto rules, however, still require the inverter (they decide from battery and grid data), so they pause their decisions until it is back. The charger (BLE) connection is required in every mode.
 *   **Kézi indítás (Start):** Immediately starts charging at the configured current. Once charging completes (e.g., the car is fully charged or unplugged), the manual override automatically clears and reverts to Solar/Scheduled automation.
 *   **Kézi Stop (Hard Stop):** Immediately stops charging and **suspends all Solar/Scheduled automation** until you manually click the red "Visszavonás" (Cancel Override) button.
 *   **Ideiglenes leállítás (Soft Stop):** Stops the current charge session but does not suspend automation rules. If Solar Auto conditions are met again later, charging can automatically restart.
@@ -218,7 +219,7 @@ The dashboard provides the following settings:
 
 The dashboard includes a built-in "Console" and "Error boxes" that provide real-time feedback:
 *   **Yellow Warning:** Cooldown timer active (prevents Bluetooth commands from spamming the charger too quickly).
-*   **Red Error:** Connection problems with the Inverter (Modbus) or the Charger (BLE).
+*   **Red Error:** Connection problems with the Inverter (Modbus) or the Charger (BLE). With a red inverter, Solar Auto decisions pause but Force and fixed-current scheduled charging keep working; with a red charger, no charging control works at all.
 *   **Red Lockdown:** Safety lockdown (Flapping protection) has activated, manual unlock required.
 *   **Console output:** Logs detailed network and charging events.
 
