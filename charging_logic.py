@@ -251,6 +251,32 @@ def fetch_inverter_data_blocking():
             raise
 
 
+_INVERTER_POLL_INTERVAL_S = 10           # lekérdezési időköz töltés nélkül
+_INVERTER_POLL_INTERVAL_CHARGING_S = 20  # aktív töltés közben: csúcsterhelésnél a logger rosszul válaszol, kíméljük
+_INVERTER_POLL_PONG_STEP_S = 5           # az alvás ilyen lépésekben, mindegyik előtt PONG (Watchdog: 30 s)
+
+
+def _inverter_poll_interval():
+    """A következő lekérdezésig hátralévő időköz a töltő saját (BLE) állapota alapján."""
+    with state_lock:
+        charging = shared_state["charging_active"]
+    return _INVERTER_POLL_INTERVAL_CHARGING_S if charging else _INVERTER_POLL_INTERVAL_S
+
+
+async def _inverter_poll_wait():
+    """Alvás a következő lekérdezésig, darabolva: minden lépés előtt és a végén is PONG, így a
+    Watchdog-rés legfeljebb egy lépés vagy egy lekérdezés ideje, az időköztől függetlenül.
+    A lépések között újraértékeli az időközt, így ha a töltés leáll, hamar visszaáll a sűrűbb ütemre."""
+    start = time.monotonic()
+    while True:
+        with state_lock:
+            shared_state["task_pong"]["inverter"] = time.time()
+        remaining = _inverter_poll_interval() - (time.monotonic() - start)
+        if remaining <= 0:
+            return
+        await asyncio.sleep(min(_INVERTER_POLL_PONG_STEP_S, remaining))
+
+
 async def run_inverter_polling():
     """Aszinkron inverter adatlekérdezés task."""
     global shared_state
@@ -281,11 +307,9 @@ async def run_inverter_polling():
         except Exception as e:
             with state_lock:
                 shared_state["inverter_connected"] = False
-            log_message(f"Deye Logger lekérdezési hiba ({INVERTER_IP}): {e}. Újrapróbálkozás 10 másodperc múlva...")
+            log_message(f"Deye Logger lekérdezési hiba ({INVERTER_IP}): {e}. Újrapróbálkozás {_inverter_poll_interval()} másodperc múlva...")
 
-        with state_lock:
-            shared_state["task_pong"]["inverter"] = time.time()
-        await asyncio.sleep(10)
+        await _inverter_poll_wait()
 
 
 # --- BLE KLIENS KEZELÉS ---

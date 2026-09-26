@@ -62,10 +62,12 @@ A vezérlő szoftver szorosan együttműködik a Deye inverter belső akkumulát
 A szoftver Python-ban íródott, és Python forráskódként, vagy PyInstaller-rel egyetlen végrehajtható fájllá (EXE) fordítva futtatható Windows rendszereken.
 
 ### A) Python Környezet Beállítása (Windows)
-Telepítsd a Python 3.9+ verziót, majd a szükséges csomagokat:
+Telepítsd a Python 3.14-et (a Windows-os exe ezzel készül; a korábban használt 3.9 támogatása megszűnt), lehetőleg egy virtuális környezetbe, majd a szükséges csomagokat:
 ```bash
-pip install bleak==0.20.2 bleak-winrt==1.2.0 pysolarmanv5 pyinstaller
+py -3.14 -m venv .venv314
+.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome pyinstaller
 ```
+A legutóbb ellenőrzött verziók: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `pyinstaller 6.22.3`.
 
 ### B) Futtatás Szimulációs Módban
 A webes felület és a szabályok teszteléséhez valódi hardver nélkül:
@@ -83,7 +85,7 @@ python main.py
 ### D) Fordítás önálló `.exe` fájllá
 A projekt gyökerében található `deye_besen_controller.spec` fájl tartalmazza a fordítási konfigurációt (ikon, egyfájlos csomagolás). A fordításhoz:
 ```powershell
-py -m PyInstaller deye_besen_controller.spec --noconfirm
+.venv314\Scripts\python.exe -m PyInstaller deye_besen_controller.spec --noconfirm
 ```
 A fordítás után a létrejövő `dist\deye_besen_controller.exe` fájlt másold vissza a projekt gyökerébe. A futtatáshoz az exe mellé szükséges a `crypto-js.min.js` és (opcionálisan) a `background.png` fájl is, mivel ezeket a program futásidőben, az exe mellől tölti be.
 
@@ -186,6 +188,7 @@ A szoftver számos biztonsági mechanizmust tartalmaz a hardver és a hálózat 
 5.  **Hálózati aszinkronizáció és telemetria Watchdog (önjavítás):**
     *   A Deye inverter szinkron Modbus kérései (`pysolarmanv5`) egy külön háttérszálon futnak, így a hálózati fennakadások nem fagyasztják be a fő eseményhurkot.
     *   **Egyetlen inverter-kapcsolat:** a program mindig legfeljebb egy kapcsolatot tart nyitva a Wi-Fi loggerrel (ami csak nagyon kevés párhuzamos kapcsolatot fogad). Kiesés után a régi kapcsolat lezárul, és a program újat épít — elárvult kapcsolatok nem halmozódnak fel, és nem foglalják el a logger szabad helyeit.
+    *   **Ritkább lekérdezés töltés közben:** a program alapból 10 másodpercenként kérdezi a loggert, aktív autótöltés közben viszont 20 másodpercenként, mert az inverter csúcsterhelésénél a logger gyakran nem válaszol. Ennek ára, hogy Solar Auto töltés közben a ház-túlterhelés, az alsó SoC és a hálózati import miatti leállítás legfeljebb kb. 10 másodperccel később reagálhat (a töltő saját terheléskezelése ettől függetlenül véd).
     *   Minden Bluetooth írási és értesítési kérés szigorú, 5 másodperces időkorláttal védett, a kapcsolat lezárása pedig 12 másodperces időkorláttal (egy elakadt lezárás naplózódik, és nem blokkolja a programot).
     *   **Kapcsolódási időtúllépés védelem:** a `BleakClient` kapcsolódási kísérletei (`client.connect()`) néha végtelenül beragadhatnak a Windows Bluetooth-verem belsejében. Ennek kezelésére a kapcsolódási kísérletek egy explicit, 20 másodperces aszinkron időkorláttal (`asyncio.wait_for`) vannak becsomagolva. Ha a kapcsolódás tovább tart, megszakad, a socket felszabadul, és új újracsatlakozási ciklus indul.
     *   Ha a kapcsolat állapota `LOGGED_IN`, de 15 másodpercig nem érkezik telemetria csomag a töltőtől, a beépített watchdog időtúllépést naplóz, lezárja a halott kapcsolatot, és tisztán újraindítja a BLE felfedezési és újracsatlakozási folyamatot.

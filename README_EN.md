@@ -62,10 +62,12 @@ The controller software works in close harmony with the Deye inverter's internal
 The software is written in Python and can be run on Windows either as Python source code, or compiled with PyInstaller into a single executable file (EXE).
 
 ### A) Python Environment Setup (Windows)
-Install Python 3.9+, then install the required dependencies:
+Install Python 3.14 (the Windows exe is built with it; the previously used 3.9 is end-of-life), preferably into a virtual environment, then install the required dependencies:
 ```bash
-pip install bleak==0.20.2 bleak-winrt==1.2.0 pysolarmanv5 pyinstaller
+py -3.14 -m venv .venv314
+.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome pyinstaller
 ```
+Last verified versions: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `pyinstaller 6.22.3`.
 
 ### B) Running in Simulation Mode
 To test the web interface and rules without any real hardware:
@@ -83,7 +85,7 @@ python main.py
 ### D) Compiling to a Standalone `.exe`
 The `deye_besen_controller.spec` file in the project root holds the build configuration (icon, single-file packaging). To compile:
 ```powershell
-py -m PyInstaller deye_besen_controller.spec --noconfirm
+.venv314\Scripts\python.exe -m PyInstaller deye_besen_controller.spec --noconfirm
 ```
 After compilation, copy the resulting `dist\deye_besen_controller.exe` back to the project root. To run, the `crypto-js.min.js` file (and optionally `background.png`) must sit next to the exe, since the program loads them from the executable's own directory at runtime.
 
@@ -186,6 +188,7 @@ The software features multiple safety mechanisms to protect the hardware, the el
 5.  **Network Asynchronization and Telemetry Watchdog (Self-Healing):**
     *   Deye inverter synchronous Modbus requests (`pysolarmanv5`) run on a separate background worker thread, ensuring network interruptions do not freeze the main event loop.
     *   **A single inverter connection:** the program keeps at most one connection open to the Wi-Fi logger (which accepts only very few parallel connections). After an outage the old connection is closed and a new one is built — orphaned connections do not pile up and do not take over the logger's free slots.
+    *   **Less frequent polling while charging:** by default the program polls the logger every 10 seconds, but every 20 seconds while the car is actively charging, because the logger often fails to respond when the inverter is under peak load. The trade-off is that during Solar Auto charging the stops for house overload, low SoC and grid import can react up to about 10 seconds later (the charger's own load management protects regardless).
     *   All Bluetooth write and notification requests are constrained by a strict 5-second timeout limit, and closing the connection has a 12-second timeout (a hung disconnect is logged and does not block the program).
     *   **Connection Timeout Protection:** `BleakClient` connection attempts (`client.connect()`) can occasionally hang indefinitely within the Windows Bluetooth stack. To mitigate this, connection attempts are wrapped in an explicit 20-second async timeout (`asyncio.wait_for`). If connection takes longer, it is aborted, the socket is cleaned up, and a fresh reconnection cycle is started.
     *   If the connection state is `LOGGED_IN` but no telemetry packets arrive from the charger for 15 seconds, the built-in watchdog logs a timeout, closes the dead connection, and cleanly restarts the BLE discovery and reconnection process.
