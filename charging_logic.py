@@ -139,16 +139,25 @@ _persistent_inverter = None
 # védőhálóként biztosítja, hogy egyszerre csak egy szál használja a kapcsolatot.
 _inverter_lock = threading.Lock()
 
-# Explicit, a Watchdog 30 mp-es türelmi ideje alá eső socket-timeout. Legrosszabb eset egy
-# hívásban: kapcsolódás (<=10 mp) + egy olvasás (<=10 mp) = 20 mp, tehát a Watchdog
-# task.cancel()-je (ami a mögötte futó OS-szálat nem tudja megszakítani) nem aktiválódik.
-_INVERTER_SOCKET_TIMEOUT = 10
+# Socket-timeout: a könyvtár a kapcsolódásra és minden egyes válasz-várakozásra is ezt
+# használja. 2026-09-19 és 09-26 között 10 mp volt, de a napló szerint a logger terhelés
+# alatt gyakran 10-15 mp alatt válaszol (az időtúllépések kb. megháromszorozódtak), ezért
+# vissza 15 mp-re. Egy teljes lekérdezés így a 30 mp-es Watchdog-határnál tovább is tarthat:
+# ezért a lekérdezés minden lépése után PONG megy (_inverter_pong), a rés legfeljebb egy
+# művelet (<=15 mp); egy valóban beragadt lépés után nincs PONG, azt a Watchdog elkapja.
+_INVERTER_SOCKET_TIMEOUT = 15
 
 # "Gyors" kapcsolat-hibák: a kapcsolat már lezárult, a hiba azonnal jelentkezik (nincs
 # várakozás), ezért biztonságos ugyanabban a hívásban egyszer újraépíteni. Az időtúllépés
 # (TimeoutError) SZÁNDÉKOSAN nincs benne -- az újrapróbálkozás megnövelné a hívás időigényét.
 # AttributeError: az olvasó szál éppen lezárta a socketet (self.sock == None).
 _INVERTER_FAST_FAIL_ERRORS = (NoSocketAvailableError, ConnectionError, AttributeError)
+
+
+def _inverter_pong():
+    """Életjel a Watchdognak a lekérdezés közben (a háttérszálból is hívható: a state_lock RLock)."""
+    with state_lock:
+        shared_state["task_pong"]["inverter"] = time.time()
 
 
 def _open_inverter():
@@ -201,15 +210,18 @@ def _close_inverter():
 
 def _read_inverter_registers(inverter):
     """Az inverter telemetria-regisztereinek beolvasása egy már felépített kapcsolaton."""
-    pv_regs = inverter.read_holding_registers(register_addr=672, quantity=2)
+    def read(addr, quantity=1):
+        regs = inverter.read_holding_registers(register_addr=addr, quantity=quantity)
+        _inverter_pong()
+        return regs
+
+    pv_regs = read(672, 2)
     pv_power = sum(pv_regs)  # PV1 and PV2 power, sum them to get pv_power
-    grid_power_internal = to_signed_16(
-        inverter.read_holding_registers(register_addr=607, quantity=1)[0])
-    grid_power_external = to_signed_16(
-        inverter.read_holding_registers(register_addr=619, quantity=1)[0])
-    battery_soc = inverter.read_holding_registers(register_addr=588, quantity=1)[0]
-    ups_load_power = inverter.read_holding_registers(register_addr=643, quantity=1)[0]
-    battery_power = to_signed_16(inverter.read_holding_registers(register_addr=590, quantity=1)[0])
+    grid_power_internal = to_signed_16(read(607)[0])
+    grid_power_external = to_signed_16(read(619)[0])
+    battery_soc = read(588)[0]
+    ups_load_power = read(643)[0]
+    battery_power = to_signed_16(read(590)[0])
 
     # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
     charger_power = max(0, grid_power_external - grid_power_internal)
@@ -227,8 +239,13 @@ def _read_inverter_registers(inverter):
 def fetch_inverter_data_blocking():
     """Inverter telemetria adatainak szinkron lekérdezése."""
     with _inverter_lock:
+        _inverter_pong()
         fresh = _persistent_inverter is None
-        inverter = _persistent_inverter if not fresh else _open_inverter()
+        if fresh:
+            inverter = _open_inverter()
+            _inverter_pong()
+        else:
+            inverter = _persistent_inverter
 
         try:
             return _read_inverter_registers(inverter)
@@ -241,6 +258,7 @@ def fetch_inverter_data_blocking():
             if fresh:
                 raise
             inverter = _open_inverter()
+            _inverter_pong()
             try:
                 return _read_inverter_registers(inverter)
             except Exception:
