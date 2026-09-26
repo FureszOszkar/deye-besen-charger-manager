@@ -3,6 +3,7 @@ import threading
 import time
 from bleak import BleakClient, BleakScanner
 from pysolarmanv5 import PySolarmanV5, NoSocketAvailableError
+from umodbus.exceptions import IllegalDataAddressError, IllegalFunctionError, IllegalDataValueError
 
 import config as config
 from config import (
@@ -208,20 +209,28 @@ def _close_inverter():
         pass
 
 
-def _read_inverter_registers(inverter):
-    """Az inverter telemetria-regisztereinek beolvasása egy már felépített kapcsolaton."""
-    def read(addr, quantity=1):
-        regs = inverter.read_holding_registers(register_addr=addr, quantity=quantity)
-        _inverter_pong()
-        return regs
+# A telemetria-regiszterek egy tartományba esnek (588..673, 86 regiszter, Modbus-limit 125),
+# ezért alapból EGYETLEN kéréssel olvassuk őket a korábbi 6 helyett: a logger terhelés alatt
+# lassan válaszol, és minden külön kérés egy újabb esély az időtúllépésre.
+_INVERTER_REG_FIRST = 588
+_INVERTER_REG_LAST = 673
+# Visszaesés: ha a logger/inverter a tartományt "nem támogatott" Modbus-hibával utasítja el,
+# a folyamat hátralévő részére a régi, egyenkénti kérésekre váltunk. Átmeneti hibák
+# (időtúllépés, kapcsolathiba, ServerDeviceBusyError) NEM váltanak vissza.
+_INVERTER_RANGE_UNSUPPORTED = (IllegalDataAddressError, IllegalFunctionError, IllegalDataValueError)
+_INVERTER_REGS_SINGLE = ((672, 2), (607, 1), (619, 1), (588, 1), (643, 1), (590, 1))
+_inverter_range_read = True
+_inverter_read_mode_logged = False
 
-    pv_regs = read(672, 2)
-    pv_power = sum(pv_regs)  # PV1 and PV2 power, sum them to get pv_power
-    grid_power_internal = to_signed_16(read(607)[0])
-    grid_power_external = to_signed_16(read(619)[0])
-    battery_soc = read(588)[0]
-    ups_load_power = read(643)[0]
-    battery_power = to_signed_16(read(590)[0])
+
+def _inverter_data_from_regs(reg):
+    """Telemetria a nyers regiszterértékekből ({cím: érték})."""
+    pv_power = reg[672] + reg[673]  # PV1 and PV2 power, sum them to get pv_power
+    grid_power_internal = to_signed_16(reg[607])
+    grid_power_external = to_signed_16(reg[619])
+    battery_soc = reg[588]
+    ups_load_power = reg[643]
+    battery_power = to_signed_16(reg[590])
 
     # Autótöltő fogyasztásának kiszámítása (Külső Grid CT - Inverter saját Grid portja)
     charger_power = max(0, grid_power_external - grid_power_internal)
@@ -234,6 +243,41 @@ def _read_inverter_registers(inverter):
         "battery_power": battery_power,
         "charger_power": charger_power
     }
+
+
+def _read_inverter_registers(inverter):
+    """Az inverter telemetria-regisztereinek beolvasása egy már felépített kapcsolaton."""
+    global _inverter_range_read, _inverter_read_mode_logged
+
+    def read(addr, quantity):
+        values = inverter.read_holding_registers(register_addr=addr, quantity=quantity)
+        _inverter_pong()
+        if len(values) != quantity:
+            raise ValueError(f"Hiányos válasz: {len(values)}/{quantity} regiszter ({addr}-tól)")
+        return dict(zip(range(addr, addr + quantity), values))
+
+    if _inverter_range_read:
+        try:
+            data = _inverter_data_from_regs(
+                read(_INVERTER_REG_FIRST, _INVERTER_REG_LAST - _INVERTER_REG_FIRST + 1))
+        except _INVERTER_RANGE_UNSUPPORTED as e:
+            _inverter_range_read = False
+            _inverter_read_mode_logged = True
+            log_message(f"[INVERTER] A logger nem fogadja el az egyben olvasást "
+                        f"({_INVERTER_REG_FIRST}-{_INVERTER_REG_LAST}): {e!r}. "
+                        f"Visszaváltás a {len(_INVERTER_REGS_SINGLE)} külön kérésre.")
+        else:
+            if not _inverter_read_mode_logged:
+                _inverter_read_mode_logged = True
+                log_message(f"[INVERTER] Olvasási mód: egyetlen kérés "
+                            f"({_INVERTER_REG_FIRST}-{_INVERTER_REG_LAST}, "
+                            f"{_INVERTER_REG_LAST - _INVERTER_REG_FIRST + 1} regiszter).")
+            return data
+
+    regs = {}
+    for addr, quantity in _INVERTER_REGS_SINGLE:
+        regs.update(read(addr, quantity))
+    return _inverter_data_from_regs(regs)
 
 
 def fetch_inverter_data_blocking():
