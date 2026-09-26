@@ -1582,7 +1582,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <h1>Deye & BESEN</h1>
             <p>Helyi Napelemes Töltésvezérlő és Felügyelet</p>
         </div>
-        <button class="mobile-logout-btn" id="mobile-logout-btn" onclick="logout()" style="display:none;" title="Kijelentkezés">
+        <button class="mobile-logout-btn" id="mobile-logout-btn" onclick="logout()" style="{{LOGOUT_MOBILE_STYLE}}" title="Kijelentkezés">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
         </button>
         <div class="header-status-container">
@@ -1609,8 +1609,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Ütemezett
                 </div>
             </div>
-            <div class="status-divider" id="logout-divider" style="display: none;"></div>
-            <div class="status-group" id="logout-group" style="display: none;">
+            <div class="status-divider" id="logout-divider" style="{{LOGOUT_DIVIDER_STYLE}}"></div>
+            <div class="status-group" id="logout-group" style="{{LOGOUT_GROUP_STYLE}}">
                 <button onclick="logout()" class="logout-btn" style="
                     background: rgba(239, 68, 68, 0.12);
                     border: 1px solid rgba(239, 68, 68, 0.3);
@@ -2164,6 +2164,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         // === PSK TITKOSÍTÁSI MODUL (Kliens oldal, CryptoJS alapú AES-CBC + HMAC) ===
         let _sessionKeyHex = null;
 
+        // A szerver írja be az oldal kiküldésekor (GET /): be van-e kapcsolva a jelszavas védelem.
+        // Nem függ az /api/status válaszától, így hibás/visszafejthetetlen oldalon is ismert.
+        const _WEB_AUTH_ENABLED = {{WEB_AUTH_ENABLED_JS}};
+
         // SessionKey betöltése a sessionStorage-ból (a login oldal mentette oda)
         (function initPSK() {
             const storedKey = sessionStorage.getItem('_psk_key_hex');
@@ -2267,6 +2271,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             return response;
         };
+
+        // Automatikus kiléptetés kulcs nélküli betöltésnél: a munkamenet-süti érvényes (ezért a
+        // szerver a vezérlőoldalt adta), de a titkosító kulcs hiányzik a lapfül sessionStorage-ából
+        // (pl. új lap, visszaállított lap, vagy a fenti "visszafejtés sikertelen" ág után). Kulcs
+        // nélkül a titkosított státusz nem olvasható, az oldal üres/hibás maradna. A kijelentkezés
+        // törli a sütit, az újratöltés után a bejelentkező oldal jön.
+        // Csak bekapcsolt jelszavas védelemnél (kikapcsoltnál sosincs kulcs -> végtelen hurok lenne),
+        // és csak sikeres kijelentkezés után töltünk újra (401-nél a fenti burkoló tölt újra).
+        // Hálózati/nem várt hibánál NINCS újratöltés: az oldal marad a látható kijelentkezés gombbal.
+        const _autoLogoutPending = _WEB_AUTH_ENABLED && !_sessionKeyHex;
+        if (_autoLogoutPending) {
+            (async () => {
+                try {
+                    const response = await fetch('/api/logout', { method: 'POST' });
+                    if (response.status === 401) return;
+                    const res = await response.json();
+                    if (res.status === 'success') {
+                        window.location.reload();
+                    }
+                } catch (err) {
+                    console.error("Automatikus kiléptetés sikertelen:", err);
+                }
+            })();
+        }
         // === PSK MODUL VÉGE ===
 
         let configLoaded = false;
@@ -2792,11 +2820,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 currentConfig.auto_enabled = data.auto_enabled;
                 currentConfig.schedule_enabled = data.schedule_enabled;
 
-                // Kijelentkezés gomb láthatóságának kezelése
+                // Kijelentkezés gomb láthatóságának kezelése. Kezdő állapotát a szerver írja be;
+                // hiányos/visszafejthetetlen válasz (nem boolean érték) nem rejtheti el újra.
                 const logoutDiv = document.getElementById('logout-divider');
                 const logoutGrp = document.getElementById('logout-group');
                 const mobLogoutBtn = document.getElementById('mobile-logout-btn');
-                if (data.web_auth_enabled) {
+                if (typeof data.web_auth_enabled !== 'boolean') {
+                    // nem nyúlunk a gombokhoz
+                } else if (data.web_auth_enabled) {
                     logoutDiv.style.display = 'block';
                     logoutGrp.style.display = 'inline-flex';
                     if (mobLogoutBtn) mobLogoutBtn.style.display = '';
@@ -3473,19 +3504,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function logout() {
+            // A böngészőben tárolt kulcsot mindenképp töröljük; hibás oldalon is ki kell tudni lépni.
+            sessionStorage.removeItem('_psk_key_hex');
+            sessionStorage.removeItem('_psk_nonce');
             try {
-                const response = await fetch('/api/logout', {
-                    method: 'POST'
-                });
-                const res = await response.json();
-                if (res.status === 'success') {
-                    window.location.reload();
-                } else {
-                    alert("Kijelentkezés sikertelen!");
-                }
+                await _originalFetch('/api/logout', { method: 'POST' });
             } catch (err) {
+                // Tényleges hálózati hiba: az újratöltés sem segítene.
                 alert("Hiba: " + err);
+                return;
             }
+            // Siker, 401 (lejárt munkamenet) vagy bármilyen más válasz: újratöltés. Ha a süti
+            // törlődött vagy érvénytelen, a szerver a bejelentkező oldalt adja.
+            window.location.reload();
         }
 
         // Megakadályozzuk, hogy a tooltip ikonra kattintás elnyomja a checkboxokat vagy más elemeket
@@ -3533,8 +3564,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
 
         showSection('measurements');
-        setInterval(updateStatus, 2000);
-        updateStatus();
+        // Kulcs nélküli betöltésnél az automatikus kiléptetés fut; a státusz úgysem lenne olvasható.
+        if (!_autoLogoutPending) {
+            setInterval(updateStatus, 2000);
+            updateStatus();
+        }
     </script>
 </body>
 </html>"""
@@ -3676,7 +3710,18 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
             self.end_headers()
-            self.wfile.write(DASHBOARD_HTML.encode('utf-8'))
+            # A kijelentkezés gombok kezdő láthatósága és a JS-jelző a szerver oldali beállításból
+            # jön, így hibás/visszafejthetetlen státusz mellett is látszik a gomb.
+            if WEB_AUTH_ENABLED:
+                logout_styles = ("", "display: block;", "display: inline-flex;", "true")
+            else:
+                logout_styles = ("display:none;", "display: none;", "display: none;", "false")
+            page = (DASHBOARD_HTML
+                    .replace('{{LOGOUT_MOBILE_STYLE}}', logout_styles[0])
+                    .replace('{{LOGOUT_DIVIDER_STYLE}}', logout_styles[1])
+                    .replace('{{LOGOUT_GROUP_STYLE}}', logout_styles[2])
+                    .replace('{{WEB_AUTH_ENABLED_JS}}', logout_styles[3]))
+            self.wfile.write(page.encode('utf-8'))
         elif self.path == '/api/status':
             with state_lock:
                 status_data = json.loads(json.dumps(shared_state))

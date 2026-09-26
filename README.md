@@ -126,7 +126,7 @@ Mobil nézetben (keskeny képernyőn) a hagyományos fület-választó helyett e
 | 📈 (aktivitás) | Mérések |
 | 📄 (dokumentum) | Napló |
 
-A Kijelentkezés gomb mobilon a fejlécben, egy külön kis ikonként érhető el (csak akkor látszik, ha a webes hitelesítés be van kapcsolva).
+A Kijelentkezés gomb mobilon a fejlécben, egy külön kis ikonként érhető el (csak akkor látszik, ha a webes hitelesítés be van kapcsolva). A gomb akkor is látszik, ha az oldal hibásan vagy üresen töltődik be.
 
 ---
 
@@ -173,6 +173,7 @@ A szoftver számos biztonsági mechanizmust tartalmaz a hardver és a hálózat 
     *   A hitelesítés alapból aktív (`"web_auth_enabled": true`), alapértelmezett jelszó: `"admin"`.
     *   Sikeres bejelentkezés után a szerver kriptográfiailag biztonságos session tokent rendel a böngészőhöz, ami feljogosítja a telemetria megtekintésére és a rendszer vezérlésére.
     *   A fejlécben lévő **Kijelentkezés** gombbal a felhasználó azonnal törölheti a session-jét.
+    *   **Automatikus újra-bejelentkeztetés hibás oldalnál:** ha a böngésző a vezérlőoldalt a titkosító kulcs nélkül tölti be (pl. új vagy visszaállított lapon — ilyenkor az oldal üres/hibás maradna, és újratöltés sem segítene), az oldal magától kijelentkeztet, és a bejelentkező oldal jön. Ha ez valamiért nem sikerül (pl. hálózati hiba), a Kijelentkezés gomb akkor is látszik, és kézzel is ki lehet lépni.
     *   Ha nincs szükség hitelesítésre, kikapcsolható a konfigurációban (`"web_auth_enabled": false`).
 2.  **Végpontok közötti titkosítás (AES-256-GCM):** a webes műszerfal és a Python szerver közötti kommunikáció beépített, katonai szintű titkosítással védett.
     *   **Challenge-Response bejelentkezés:** a felhasználó jelszava soha nem utazik a hálózaton. A böngésző egy HMAC alapú hitelesítési bizonyítékot (Auth Proof) generál és küld el helyette.

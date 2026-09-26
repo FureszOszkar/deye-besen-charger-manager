@@ -126,7 +126,7 @@ In mobile view (narrow screen), instead of the traditional tab selector, a semi-
 | 📈 (activity) | Measurements |
 | 📄 (document) | Log |
 
-The Logout button on mobile is available as a small dedicated icon in the header (only visible when web authentication is enabled).
+The Logout button on mobile is available as a small dedicated icon in the header (only visible when web authentication is enabled). The button is visible even when the page loads broken or empty.
 
 ---
 
@@ -173,6 +173,7 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   Authentication is active by default (`"web_auth_enabled": true`), with the default password `"admin"`.
     *   Upon successful login, the server assigns a cryptographically secure session token to the browser, authorizing it to view telemetry and control the system.
     *   A **Logout** button in the header allows users to immediately clear their session.
+    *   **Automatic re-login on a broken page:** if the browser loads the dashboard without the encryption key (e.g. in a new or restored tab — the page would otherwise stay empty/broken and reloading would not help), the page logs out by itself and the login page appears. If that fails for some reason (e.g. a network error), the Logout button is still visible and you can log out manually.
     *   If authentication is not required, it can be disabled in the configuration (`"web_auth_enabled": false`).
 2.  **End-to-End Encryption (AES-256-GCM):** The communication between the web dashboard and the Python server is protected by built-in, military-grade encryption.
     *   **Challenge-Response Login:** The user's password is never transmitted over the network. The browser generates an HMAC-based authentication proof (Auth Proof) and sends it instead.

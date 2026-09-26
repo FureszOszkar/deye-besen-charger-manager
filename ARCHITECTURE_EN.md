@@ -210,12 +210,12 @@ The Web Dashboard uses responsive CSS design with a breakpoint at `1024px`. Abov
 *   **Mobile View Manager (`showSection`):** Mobile section switching is managed purely via client-side JavaScript. Clicking items in the mobile overlay menu calls `showSection(sectionId)`, which hides other main container cards and displays only the active container at full screen width, preventing layout stretching.
 
 ### Endpoints
-* **`GET /`**: Serves the single-page Dashboard HTML (`DASHBOARD_HTML` when authenticated) or the login card (`LOGIN_HTML` when unauthorized).
+* **`GET /`**: Serves the single-page Dashboard HTML (`DASHBOARD_HTML` when authenticated) or the login card (`LOGIN_HTML` when unauthorized). When serving `DASHBOARD_HTML`, the server fills in the initial visibility of the logout buttons (`{{LOGOUT_MOBILE_STYLE}}`, `{{LOGOUT_DIVIDER_STYLE}}`, `{{LOGOUT_GROUP_STYLE}}`) and the `_WEB_AUTH_ENABLED` JS constant (`{{WEB_AUTH_ENABLED_JS}}`) from `WEB_AUTH_ENABLED`, so they do not depend on the `/api/status` response.
 * **`GET /background.png`**: Serves the background image from the executable directory (handles PyInstaller temporary folder environments).
 * **`GET /api/status`**: Returns the `shared_state` dictionary as JSON (authentication required).
 * **`GET /api/login_info`**: Public, unauthenticated endpoint returning `{"pbkdf2_iterations": <int>}`. Lets any client (the web login page, the Android widget) derive the session key with the server's *current* iteration count instead of assuming a hardcoded default.
 * **`POST /api/login`**: Public login endpoint. Receives a `{"clientNonce": "...", "authProof": "..."}` PSK challenge-response payload. If correct, generates a cryptographically secure session token with a 24-hour expiry, saves it in memory, and returns it via a `Set-Cookie: session=<token>; HttpOnly; Path=/; SameSite=Lax` header.
-* **`POST /api/logout`**: Closes the active session. Removes the token from memory and expires the cookie (`Max-Age=0`).
+* **`POST /api/logout`**: Closes the active session. Removes the token from memory and expires the cookie (`Max-Age=0`). It can be called without a body or encryption (it only uses the cookie), so a page loaded without the key can log out with it too (automatic logout, see the 2026-09-26 entry).
 * **`POST /api/unlock`**: Clears the Lockdown / Cooldown safety state (authentication required).
 * **`POST /api/config`**: Receives configuration updates (authentication required). Validates, saves them to `config.json`, and updates the running control loop instantly. The `forced_schedule` field is strictly validated server-side (see Section 6 below) before being accepted.
 * **`POST /api/mode`**: Modifies the operating mode (monitoring / auto / schedule / force, authentication required).
@@ -276,6 +276,15 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 ---
 
 ## 7. Recent Fixes and Hardening
+
+### 2026-09-26
+
+**Logout on a broken/empty page (`dashboard.py`).** The user occasionally (mostly on mobile) got an empty, broken dashboard on which neither reloading nor a new tab could force a fresh page, and the logout button was not visible either, so they could not log in again. **Cause:** the logout buttons (`#mobile-logout-btn`, `#logout-group`/`#logout-divider`) started hidden and only appeared after a successful `/api/status` response. **Likely background (not proven):** the session cookie is valid (so the server serves the dashboard) but the encryption key is missing from the tab-bound `sessionStorage`, so the encrypted status cannot be read; the existing "decryption failed" branch also led here (it removed the key and reloaded). JS cannot delete the HttpOnly cookie, so reloading did not help.
+
+* **The server fills in the buttons' initial visibility** when serving `GET /` (placeholders, from `WEB_AUTH_ENABLED`), together with the `_WEB_AUTH_ENABLED` JS constant. `updateStatus()` only touches the buttons for a `boolean` `web_auth_enabled` value, so an incomplete response cannot hide them again.
+* **Automatic logout when loaded without the key:** with password protection enabled, if there is no key in `sessionStorage`, the page immediately calls `/api/logout` and reloads after a successful logout → login page. The 2 s status polling does not start in that case. On a network or unexpected error there is no reload (no loop is possible) and the button is visible. It never runs with protection disabled (there is never a key there, and the dashboard would come back after logout too).
+* **`logout()`:** always removes the `sessionStorage` keys and reloads regardless of the response content; it shows an `alert` only on an actual network error.
+* **Verification:** with the exe running in `--sim` mode, in a browser: after a normal login the button is visible in desktop and mobile (375 px) views; after removing the `sessionStorage` key and reloading, the page switched to the login page by itself, and after logging in again a normal page appeared; in the HTML sent by the server the buttons arrived with a visible style and the `_WEB_AUTH_ENABLED = true` flag (independent of the status); the manual logout button led to the login page. Running the automatic-logout snippet read from the page with a stubbed `fetch`: 0 reloads on a network error (no loop), 1 on a successful logout, and it does not run with protection disabled.
 
 ### 2026-09-20
 
