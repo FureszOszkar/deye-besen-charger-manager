@@ -50,6 +50,15 @@ def _broadlink_connect(ip):
     return dev
 
 
+def broadlink_reachable(ip):
+    """Elérhető-e a BroadLink a hálózaton (csak "hello", hitelesítés és parancs nélkül)."""
+    try:
+        broadlink.hello(ip, timeout=BROADLINK_TIMEOUT_S)
+        return True
+    except Exception:
+        return False
+
+
 def broadlink_describe(ip):
     """Az eszköz rövid leírása (modell, típuskód) a felülethez."""
     dev = _broadlink_connect(ip)

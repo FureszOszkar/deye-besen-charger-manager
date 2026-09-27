@@ -1,4 +1,4 @@
-# Deye & BESEN Controller – Architecture and Code Structure Documentation
+# Otthonvezérlő – Architecture and Code Structure Documentation
 
 This document details the internal design, threading model, data flow, and the BESEN Bluetooth Low Energy (BLE) protocol implementation of the `main.py (along with its modules)` software for developers.
 

@@ -1,4 +1,4 @@
-# Deye & BESEN Integrated Charger Controller System
+# Otthonvezérlő – Local EV Charging and Air Conditioner Controller
 ## System Documentation and User Manual
 
 This software is a local, offline-running integrated controller solution that connects a **Deye three-phase hybrid inverter** and a **BESEN BS20 smart car charger (EVSE)**. The software aims to automatically, intelligently, and safely control electric vehicle charging based on solar energy generation and the home storage battery status.

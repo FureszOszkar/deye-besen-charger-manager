@@ -158,7 +158,8 @@ shared_state = {
         "sensor": {"ip": "", "token_set": False, "connected": False, "temperature": None,
                    "humidity": None, "updated": 0.0, "error": ""},
         "units": [
-            {"name": "", "broadlink_ip": "", "has_on_heat": False, "has_on_cool": False, "has_off": False, "busy": "",
+            {"name": "", "broadlink_ip": "", "has_on_heat": False, "has_on_cool": False, "has_off": False,
+             "reachable": None, "busy": "",
              "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
             for _ in range(CLIMATE_UNIT_COUNT)
         ]

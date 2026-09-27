@@ -1,4 +1,4 @@
-# Deye & BESEN Vezérlő – Architektúra és Kódstruktúra Dokumentáció
+# Otthonvezérlő – Architektúra és Kódstruktúra Dokumentáció
 
 Ez a dokumentum részletezi a `main.py` (és moduljai) belső tervezését, a szálkezelési modellt (threading), az adatáramlást és a BESEN Bluetooth Low Energy (BLE) protokoll megvalósítását fejlesztők számára.
 

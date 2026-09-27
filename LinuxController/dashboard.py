@@ -193,7 +193,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Deye & BESEN - Bejelentkezés</title>
+    <title>Otthonvezérlő - Bejelentkezés</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         :root {
@@ -307,7 +307,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 </head>
 <body>
     <div class="login-container">
-        <h1>Deye & BESEN</h1>
+        <h1>Otthonvezérlő</h1>
         <p>A kezelőfelület eléréséhez kérjük, add meg a jelszót.</p>
         <div id="error-msg" class="error-box">Helytelen jelszó!</div>
         <form id="login-form">
@@ -394,7 +394,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deye & BESEN Integrált Vezérlő</title>
+    <title>Otthonvezérlő</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -447,10 +447,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         header {
-            padding: 0.8rem 1.2rem;
+            padding: 0.6rem 1.2rem;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
             border-bottom: 1px solid var(--border-color);
             background: rgba(15, 23, 42, 0.6);
             backdrop-filter: blur(10px);
@@ -469,11 +470,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             color: var(--text-muted);
         }
 
+        /* Felső sor: cím, Kapcsolatok, Automatizmusok, Kijelentkezés; alatta a fülek */
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+        .logo-section {
+            flex-shrink: 0;
+        }
         .header-status-container {
             display: flex;
             flex-direction: row;
+            flex-wrap: wrap;
             align-items: center;
-            gap: 1.2rem;
+            gap: 0.4rem 1rem;
+            flex: 1;
+        }
+        #logout-group {
+            margin-left: auto;
         }
 
         .status-divider {
@@ -485,7 +501,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .status-group {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.3rem;
+            white-space: nowrap;
         }
 
         .status-group-label {
@@ -498,21 +515,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         .badge {
-            padding: 0.35rem 0.75rem;
+            padding: 0.2rem 0.55rem;
             border-radius: 9999px;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             font-weight: 600;
             display: flex;
             align-items: center;
-            gap: 0.4rem;
+            gap: 0.3rem;
             border: 1px solid var(--border-color);
-            width: 120px;
             justify-content: center;
         }
 
         .badge-dot {
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background-color: var(--text-muted);
         }
@@ -551,14 +567,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         /* Egységes cián szín az aktív automatizmus jelvényeknek feltűnő glow hatással */
-        #badge-toggle-auto.active, #badge-toggle-schedule.active {
+        #badge-toggle-auto.active, #badge-toggle-schedule.active, #badge-toggle-climate.active {
             background: rgba(34, 211, 238, 0.25);
             border-color: rgba(34, 211, 238, 0.9);
             color: #22d3ee;
             box-shadow: 0 0 16px rgba(34, 211, 238, 0.7), 0 0 32px rgba(34, 211, 238, 0.35), inset 0 0 6px rgba(34, 211, 238, 0.4);
             font-weight: 700;
         }
-        #badge-toggle-auto.active .badge-dot, #badge-toggle-schedule.active .badge-dot {
+        #badge-toggle-auto.active .badge-dot, #badge-toggle-schedule.active .badge-dot, #badge-toggle-climate.active .badge-dot {
             background-color: #22d3ee;
             box-shadow: 0 0 8px #ffffff, 0 0 18px #22d3ee, 0 0 28px #22d3ee;
         }
@@ -585,11 +601,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border-color);
-            padding: 0.4rem 0.8rem;
-            justify-content: space-around;
-            align-items: center;
-            font-size: 0.75rem;
+            padding: 0.3rem 0.8rem;
+            flex-direction: column;
+            gap: 0.2rem;
+            font-size: 0.7rem;
             width: 100%;
+        }
+        .status-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.25rem 0.7rem;
+        }
+        .status-row-label {
+            color: var(--text-muted);
+            font-weight: 700;
+            min-width: 3.2rem;
         }
 
         .status-dot-item {
@@ -1179,8 +1206,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .page-tabs {
             display: flex;
             gap: 0.4rem;
-            margin-right: auto;
-            margin-left: 1.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border-color);
         }
         .page-tab {
             background: rgba(15, 23, 42, 0.6);
@@ -1564,9 +1591,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 position: sticky;
                 top: 0;
                 z-index: 100;
-                flex-direction: row !important;
+                flex-direction: column !important;
                 justify-content: space-between;
-                align-items: center;
+                align-items: stretch;
                 gap: 0.8rem;
                 padding: 0.8rem 1rem;
                 background: rgba(15, 23, 42, 0.85) !important;
@@ -1716,13 +1743,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <body>
 
     <header>
+        <div class="header-top">
         <div class="logo-section">
-            <h1>Deye & BESEN</h1>
-            <p>Helyi Napelemes Töltésvezérlő és Felügyelet</p>
-        </div>
-        <div class="page-tabs">
-            <button type="button" class="page-tab active" id="page-tab-charger" onclick="showPage('charger')">Autótöltő</button>
-            <button type="button" class="page-tab" id="page-tab-climate" onclick="showPage('climate')">Klímavezérlés</button>
+            <h1>Otthonvezérlő</h1>
+            <p>Helyi autótöltés és klíma vezérlő</p>
         </div>
         <button class="mobile-logout-btn" id="mobile-logout-btn" onclick="logout()" style="{{LOGOUT_MOBILE_STYLE}}" title="Kijelentkezés">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -1730,26 +1754,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="header-status-container">
             <div class="status-group">
                 <span class="status-group-label">Kapcsolatok:</span>
-                <div id="badge-inverter" class="badge inactive">
-                    <div class="badge-dot"></div>
-                    Deye Wi-Fi
-                </div>
-                <div id="badge-charger" class="badge inactive">
-                    <div class="badge-dot"></div>
-                    BESEN BLE
-                </div>
+                <div id="badge-inverter" class="badge inactive"><div class="badge-dot"></div>Inverter</div>
+                <div id="badge-charger" class="badge inactive"><div class="badge-dot"></div>Töltő</div>
+                <div id="badge-sensor" class="badge off"><div class="badge-dot"></div>Hőmérő</div>
+                <div id="badge-unit-0" class="badge off"><div class="badge-dot"></div>Klíma1</div>
+                <div id="badge-unit-1" class="badge off"><div class="badge-dot"></div>Klíma2</div>
+                <div id="badge-unit-2" class="badge off"><div class="badge-dot"></div>Klíma3</div>
             </div>
             <div class="status-divider"></div>
             <div class="status-group">
                 <span class="status-group-label">Automatizmusok:</span>
-                <div id="badge-toggle-auto" class="badge off">
-                    <div class="badge-dot"></div>
-                    Solar Auto
-                </div>
-                <div id="badge-toggle-schedule" class="badge off">
-                    <div class="badge-dot"></div>
-                    Ütemezett
-                </div>
+                <div id="badge-toggle-auto" class="badge off"><div class="badge-dot"></div>Auto solar</div>
+                <div id="badge-toggle-schedule" class="badge off"><div class="badge-dot"></div>Auto ütemezett</div>
+                <div id="badge-toggle-climate" class="badge off"><div class="badge-dot"></div>Klíma</div>
             </div>
             <div class="status-divider" id="logout-divider" style="{{LOGOUT_DIVIDER_STYLE}}"></div>
             <div class="status-group" id="logout-group" style="{{LOGOUT_GROUP_STYLE}}">
@@ -1772,25 +1789,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </button>
             </div>
         </div>
+        </div>
+        <div class="page-tabs">
+            <button type="button" class="page-tab active" id="page-tab-charger" onclick="showPage('charger')">Autótöltő</button>
+            <button type="button" class="page-tab" id="page-tab-climate" onclick="showPage('climate')">Klímavezérlés</button>
+        </div>
     </header>
 
     <!-- Mobil tapadós státusz sáv -->
     <div class="status-bar-mobile" id="status-bar-mobile">
-        <div class="status-dot-item" id="mobile-status-deye">
-            <div class="dot"></div>
-            <span>Deye</span>
+        <div class="status-row">
+            <span class="status-row-label">Kapcs.:</span>
+            <div class="status-dot-item" id="mobile-status-deye"><div class="dot"></div><span>Inverter</span></div>
+            <div class="status-dot-item" id="mobile-status-besen"><div class="dot"></div><span>Töltő</span></div>
+            <div class="status-dot-item" id="mobile-status-sensor"><div class="dot"></div><span>Hőmérő</span></div>
+            <div class="status-dot-item" id="mobile-status-unit-0"><div class="dot"></div><span>K1</span></div>
+            <div class="status-dot-item" id="mobile-status-unit-1"><div class="dot"></div><span>K2</span></div>
+            <div class="status-dot-item" id="mobile-status-unit-2"><div class="dot"></div><span>K3</span></div>
         </div>
-        <div class="status-dot-item" id="mobile-status-besen">
-            <div class="dot"></div>
-            <span>BESEN</span>
-        </div>
-        <div class="status-dot-item auto-active" id="mobile-status-auto">
-            <div class="dot"></div>
-            <span>Auto</span>
-        </div>
-        <div class="status-dot-item auto-active" id="mobile-status-schedule">
-            <div class="dot"></div>
-            <span>Ütemezett</span>
+        <div class="status-row">
+            <span class="status-row-label">Auto.:</span>
+            <div class="status-dot-item auto-active" id="mobile-status-auto"><div class="dot"></div><span>Solar</span></div>
+            <div class="status-dot-item auto-active" id="mobile-status-schedule"><div class="dot"></div><span>Ütemezett</span></div>
+            <div class="status-dot-item auto-active" id="mobile-status-climate"><div class="dot"></div><span>Klíma</span></div>
         </div>
     </div>
 
@@ -2363,7 +2384,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </main>
 
     <footer>
-        Deye & BESEN Helyi Töltésoptimalizáló Vezérlő &copy; 2026
+        Otthonvezérlő &copy; 2026
     </footer>
 
     <script src="/crypto-js.min.js"></script>
@@ -3794,8 +3815,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        // Fejléc (asztali) és mobil státuszsáv jelvényei: 'active' = zöld, 'inactive' = piros, 'off' = szürke
+        function setHeaderBadge(id, state) {
+            const e = document.getElementById(id);
+            if (e) e.className = 'badge ' + state;
+        }
+        function setMobileDot(id, state, auto) {
+            const e = document.getElementById(id);
+            if (!e) return;
+            e.className = 'status-dot-item' + (auto ? ' auto-active' : '') +
+                (state === 'active' ? ' active' : state === 'inactive' ? ' inactive' : '');
+        }
+
         function renderClimate(c) {
             buildClimateUnits();
+
+            // Kapcsolatok: Hőmérő és Klíma1–3 (nincs beállítva = szürke)
+            const sensor = c.sensor || {};
+            const sensorState = (!sensor.ip || !sensor.token_set) ? 'off' : (sensor.connected ? 'active' : 'inactive');
+            setHeaderBadge('badge-sensor', sensorState);
+            setMobileDot('mobile-status-sensor', sensorState, false);
+            (c.units || []).forEach((u, i) => {
+                const st = !u.broadlink_ip ? 'off' : (u.reachable === true ? 'active' : (u.reachable === false ? 'inactive' : 'off'));
+                setHeaderBadge('badge-unit-' + i, st);
+                setMobileDot('mobile-status-unit-' + i, st, false);
+            });
+            // Automatizmusok: Klíma (a 2. fázisban kap működést, addig kikapcsolt)
+            const climateAuto = c.auto_enabled === true ? 'active' : 'off';
+            setHeaderBadge('badge-toggle-climate', climateAuto);
+            setMobileDot('mobile-status-climate', climateAuto, true);
 
             // Mérések kártya: hőmérő
             const s = c.sensor || {};

@@ -85,12 +85,43 @@ async def _read_sensor_once(previous_connected):
     return connected
 
 
+async def _check_units_once():
+    """A beállított BroadLinkek elérhetőségének ellenőrzése (a fejléc Klíma1–3 jelvényéhez).
+    A művelet alatt álló (tanítás/küldés) klímát kihagyjuk."""
+    with state_lock:
+        units = [(i, u["broadlink_ip"]) for i, u in enumerate(cfg.CLIMATE_CONFIG["units"])]
+        sim = shared_state["simulation"]
+    for i, ip in units:
+        _pong()
+        with state_lock:
+            busy = shared_state["climate"]["units"][i]["busy"]
+            previous = shared_state["climate"]["units"][i]["reachable"]
+        if busy:
+            continue
+        if not ip:
+            reachable = None
+        elif sim:
+            reachable = True
+        else:
+            try:
+                reachable = await asyncio.wait_for(asyncio.to_thread(dev.broadlink_reachable, ip),
+                                                   timeout=dev.BROADLINK_TIMEOUT_S + 3)
+            except asyncio.TimeoutError:
+                reachable = False
+        with state_lock:
+            shared_state["climate"]["units"][i]["reachable"] = reachable
+        if reachable is not None and reachable != previous:
+            log_message(f"[KLÍMA] {_unit_label(i)}: BroadLink ({ip}) "
+                        f"{'elérhető' if reachable else 'nem érhető el'}.")
+
+
 async def run_climate_polling():
-    """A légtisztító percenkénti kiolvasása (Watchdog alatt)."""
+    """A légtisztító és a BroadLinkek percenkénti ellenőrzése (Watchdog alatt)."""
     previous_connected = None
     while True:
         _pong()
         previous_connected = await _read_sensor_once(previous_connected)
+        await _check_units_once()
         waited = 0
         while waited < SENSOR_POLL_INTERVAL_S:
             _pong()
