@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import threading
 import time
 from bleak import BleakClient, BleakScanner
@@ -154,6 +155,13 @@ _INVERTER_SOCKET_TIMEOUT = 15
 # AttributeError: az olvasó szál éppen lezárta a socketet (self.sock == None).
 _INVERTER_FAST_FAIL_ERRORS = (NoSocketAvailableError, ConnectionError, AttributeError)
 
+# Időtúllépés: a pysolarmanv5 a válaszra várva queue.Empty-t (vagy TimeoutError-t) dob.
+# Egyetlen késés miatt nem bontjuk a kapcsolatot, csak ennyi EGYMÁS UTÁNI időtúllépés után
+# (lásd _on_inverter_read_error). A lekérdezés ettől még sikertelen (piros jelzés egy körre).
+_INVERTER_TIMEOUT_ERRORS = (queue.Empty, TimeoutError)
+_INVERTER_TIMEOUTS_BEFORE_CLOSE = 2
+_inverter_timeout_streak = 0
+
 
 def _inverter_pong():
     """Életjel a Watchdognak a lekérdezés közben (a háttérszálból is hívható: a state_lock RLock)."""
@@ -188,9 +196,10 @@ def _close_inverter():
     A disconnect() leállítja az olvasó szálat és lezárja a socketet. A könyvtár példányonként
     egy multiprocessing.Queue-t is létrehoz (2 csőleíró): ezt is lezárjuk, de csak akkor, ha
     az olvasó szál már megállt (különben a szál egy lezárt sorba próbálna írni)."""
-    global _persistent_inverter
+    global _persistent_inverter, _inverter_timeout_streak
     inv = _persistent_inverter
     _persistent_inverter = None
+    _inverter_timeout_streak = 0
     if inv is None:
         return
     try:
@@ -282,6 +291,7 @@ def _read_inverter_registers(inverter):
 
 def fetch_inverter_data_blocking():
     """Inverter telemetria adatainak szinkron lekérdezése."""
+    global _inverter_timeout_streak
     with _inverter_lock:
         _inverter_pong()
         fresh = _persistent_inverter is None
@@ -292,7 +302,7 @@ def fetch_inverter_data_blocking():
             inverter = _persistent_inverter
 
         try:
-            return _read_inverter_registers(inverter)
+            data = _read_inverter_registers(inverter)
         except _INVERTER_FAST_FAIL_ERRORS:
             # A logger eldobta a tartós kapcsolatot (idle állapotban gyakori). A régi
             # példányt lezárjuk, és -- ha nem éppen most épített kapcsolat hibázott --
@@ -304,13 +314,33 @@ def fetch_inverter_data_blocking():
             inverter = _open_inverter()
             _inverter_pong()
             try:
-                return _read_inverter_registers(inverter)
-            except Exception:
-                _close_inverter()
+                data = _read_inverter_registers(inverter)
+            except Exception as e:
+                _on_inverter_read_error(e)
                 raise
-        except Exception:
-            _close_inverter()
+        except Exception as e:
+            _on_inverter_read_error(e)
             raise
+        _inverter_timeout_streak = 0
+        return data
+
+
+def _on_inverter_read_error(exc):
+    """Sikertelen olvasás kezelése (a hívó tartja az _inverter_lock-ot).
+
+    Időtúllépésnél (a logger késve vagy nem válaszolt) a kapcsolatot csak a
+    _INVERTER_TIMEOUTS_BEFORE_CLOSE-adik EGYMÁS UTÁNI időtúllépésnél bontjuk: egyetlen késés
+    miatt nem építünk új TCP-kapcsolatot (a logger kevés kapcsolathelyét kímélve). Egy késve
+    beérkező régi választ a pysolarmanv5 a sorszám-ellenőrzéssel eldob (V5_SEQ_NO_MISMATCH),
+    így az nem keveredik a következő kéréssel. Minden más hibánál azonnal bontunk."""
+    global _inverter_timeout_streak
+    if isinstance(exc, _INVERTER_TIMEOUT_ERRORS):
+        _inverter_timeout_streak += 1
+        if _inverter_timeout_streak < _INVERTER_TIMEOUTS_BEFORE_CLOSE:
+            log_message(f"[INVERTER] A logger nem válaszolt időben ({_inverter_timeout_streak}/"
+                        f"{_INVERTER_TIMEOUTS_BEFORE_CLOSE}) — a kapcsolat megmarad.")
+            return
+    _close_inverter()
 
 
 _INVERTER_POLL_INTERVAL_S = 10           # lekérdezési időköz töltés nélkül
