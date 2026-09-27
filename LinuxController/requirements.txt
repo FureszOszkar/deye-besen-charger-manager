@@ -1,3 +1,4 @@
 bleak
 pysolarmanv5
 pycryptodome
+broadlink

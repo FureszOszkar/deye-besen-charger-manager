@@ -14,6 +14,7 @@ from charging_logic import (
     ble_command_queue, main_loop
 )
 from simulation import run_simulation_telemetry, console_simulation_input
+from climate_logic import run_climate_polling
 
 # --- ERŐFORRÁS-FIGYELÉS (fájlleírók) ---
 # Egy szivárgó forrás (elárvult kapcsolatok, csövek, szálak) lassan elfogyasztja a
@@ -106,7 +107,8 @@ async def main():
     tasks = {
         "inverter": asyncio.create_task(run_inverter_polling()),
         "ble": asyncio.create_task(run_ble_client()),
-        "controller": asyncio.create_task(run_charge_controller())
+        "controller": asyncio.create_task(run_charge_controller()),
+        "climate": asyncio.create_task(run_climate_polling())
     }
 
     import time
@@ -150,6 +152,8 @@ async def main():
                     tasks["ble"] = asyncio.create_task(run_ble_client())
                 elif task_name == "controller":
                     tasks["controller"] = asyncio.create_task(run_charge_controller())
+                elif task_name == "climate":
+                    tasks["climate"] = asyncio.create_task(run_climate_polling())
                 continue
 
             # 2. Befagyás ellenőrzése (Freeze - 30 másodperces limit)

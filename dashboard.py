@@ -16,6 +16,7 @@ from config import (
     HTTP_PORT, DEFAULT_CONFIG, save_config_file, load_config,
     WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
 )
+import climate_logic
 
 # --- ÜTEMEZÉS VALIDÁCIÓ ---
 FORCED_SCHEDULE_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
@@ -1174,6 +1175,75 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             border-color: var(--primary);
         }
 
+        /* Fejléc fülei: Autótöltő / Fűtés (asztali nézet; mobilon az ikondokk vált) */
+        .page-tabs {
+            display: flex;
+            gap: 0.4rem;
+            margin-right: auto;
+            margin-left: 1.5rem;
+        }
+        .page-tab {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 0.45rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .page-tab.active {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+        @media (max-width: 1024px) {
+            .page-tabs {
+                display: none;
+            }
+        }
+
+        /* Fűtés (klímák) kártya */
+        .climate-block {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+        .climate-block-title {
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+        .climate-status {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .climate-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem;
+        }
+        #climate-units {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .climate-btns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+        .climate-btns button {
+            padding: 0.4rem 0.7rem;
+            font-size: 0.8rem;
+        }
+        @media (max-width: 600px) {
+            .climate-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .checkbox-group {
             display: flex;
             align-items: center;
@@ -1582,6 +1652,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <h1>Deye & BESEN</h1>
             <p>Helyi Napelemes Töltésvezérlő és Felügyelet</p>
         </div>
+        <div class="page-tabs">
+            <button type="button" class="page-tab active" id="page-tab-charger" onclick="showPage('charger')">Autótöltő</button>
+            <button type="button" class="page-tab" id="page-tab-climate" onclick="showPage('climate')">Klímavezérlés</button>
+        </div>
         <button class="mobile-logout-btn" id="mobile-logout-btn" onclick="logout()" style="{{LOGOUT_MOBILE_STYLE}}" title="Kijelentkezés">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
         </button>
@@ -1666,6 +1740,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <button class="dock-item active" id="dock-item-measurements" onclick="showSection('measurements')" title="Mérések">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
         </button>
+        <button class="dock-item" id="dock-item-climate" onclick="showSection('climate')" title="Klímavezérlés">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path></svg>
+        </button>
         <button class="dock-item" id="dock-item-log" onclick="showSection('log')" title="Napló">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
         </button>
@@ -1673,7 +1750,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <main>
         <!-- BAL OLDAL: ÁLLAPOTOK ÉS BEÁLLÍTÁSOK -->
-        <div class="card">
+        <div class="card" id="config-card">
             <div class="card-title">Rendszervezérlés & Konfiguráció</div>
             
             <div class="alert-box alert-error" id="error-box"></div>
@@ -1832,8 +1909,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- FŰTÉS (KLÍMÁK) — csak a Fűtés fülön; a rácsban a bal hasábba esik (a Mérések előtt) -->
+        <div class="card" id="climate-card" style="display: none; flex-direction: column; gap: 1rem;">
+            <div class="card-title">Klímavezérlés</div>
+
+            <div class="climate-block">
+                <div class="climate-block-title">Légtisztító (hőmérő)</div>
+                <div id="climate-sensor-status" class="climate-status">Betöltés...</div>
+                <div class="climate-grid">
+                    <div class="input-group">
+                        <label for="climate_sensor_ip">IP-cím</label>
+                        <input type="text" id="climate_sensor_ip" placeholder="pl. 192.168.0.50">
+                    </div>
+                    <div class="input-group">
+                        <label for="climate_sensor_token">Token (32 karakter)</label>
+                        <input type="password" id="climate_sensor_token" autocomplete="off" placeholder="nincs beállítva">
+                    </div>
+                </div>
+            </div>
+
+            <div id="climate-units"></div>
+
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveClimateConfig()">Beállítások mentése</button>
+            </div>
+        </div>
+
         <!-- JOBB OLDAL: ÉLŐ TELEMETRIA ÉS MÉRÉSEK -->
-        <div class="card">
+        <div class="card" id="telemetry-card">
             <div class="card-title">
                 Mérések & Visszacsatolás
                 <span id="plug-status" style="font-size:0.8rem; font-weight:normal;"></span>
@@ -1890,7 +1993,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <div>
+            <div id="charger-telemetry-block">
                 <!-- AKTÍV TÖLTÉS NÉZET -->
                 <div id="active-charging-view" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: stretch; margin-bottom: 0.8rem;">
                     <div style="flex: 1.5; min-width: 280px; max-width: 450px;">
@@ -2837,6 +2940,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     if (mobLogoutBtn) mobLogoutBtn.style.display = 'none';
                 }
 
+                if (data.climate) renderClimate(data.climate);
+
                 // Inverter kapcsolat
                 const inverterBadge = document.getElementById('badge-inverter');
                 if (data.inverter_connected) {
@@ -3101,7 +3206,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Szimulációs állapotelemek frissítése
                 const simPanel = document.getElementById('sim-panel-card');
                 if (simPanel) {
-                    simPanel.style.display = data.simulation ? 'flex' : 'none';
+                    // Az autótöltő szimulációs panelje csak az Autótöltő fülön látszik
+                    simPanel.style.display = (data.simulation && currentPage === 'charger') ? 'flex' : 'none';
                 }
                 document.getElementById('sim_mode_toggle').checked = data.simulation;
                 document.getElementById('sim-controls-container').style.display = data.simulation ? 'flex' : 'none';
@@ -3269,6 +3375,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         let activeTab = 'auto';
         let currentSection = 'auto';
+        let currentPage = 'charger';   // 'charger' (Autótöltő) vagy 'climate' (Fűtés)
 
         function selectTab(tab) {
             activeTab = tab;
@@ -3286,6 +3393,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function showSection(section) {
             currentSection = section;
+            // A kiválasztott rész meghatározza az oldalt is (a Napló mindkettőhöz tartozik)
+            if (section === 'climate') currentPage = 'climate';
+            else if (section !== 'log') currentPage = 'charger';
+            const tabCharger = document.getElementById('page-tab-charger');
+            const tabClimate = document.getElementById('page-tab-climate');
+            if (tabCharger) tabCharger.classList.toggle('active', currentPage === 'charger');
+            if (tabClimate) tabClimate.classList.toggle('active', currentPage === 'climate');
 
             // Ikondokk kijelölés frissítése
             document.querySelectorAll('.dock-item').forEach(el => el.classList.remove('active'));
@@ -3295,41 +3409,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const isMobile = window.innerWidth <= 1024;
             
             // Kártyák kiválasztása DOM-ból
-            const cards = document.querySelectorAll('main > .card');
-            const configCard = cards[0];
-            const telemetryCard = cards[1];
+            const configCard = document.getElementById('config-card');
+            const telemetryCard = document.getElementById('telemetry-card');
             const simCard = document.getElementById('sim-panel-card');
             const logCard = document.querySelector('.console-container');
-            
+            const climateCard = document.getElementById('climate-card');
+
             if (isMobile) {
                 // Mobilon mindent elrejtünk, majd csak a kiválasztottat mutatjuk meg
                 if (configCard) configCard.style.display = 'none';
                 if (telemetryCard) telemetryCard.style.display = 'none';
                 if (simCard) simCard.style.display = 'none';
                 if (logCard) logCard.style.display = 'none';
-                
+                if (climateCard) climateCard.style.display = 'none';
+
                 if (section === 'auto' || section === 'schedule' || section === 'force') {
                     if (configCard) configCard.style.display = 'flex';
                     selectTab(section);
                 } else if (section === 'measurements') {
                     if (telemetryCard) telemetryCard.style.display = 'flex';
+                } else if (section === 'climate') {
+                    // Fűtés fül mobilon: a Mérések ablak (az autótöltő része nélkül) + a Fűtés kártya
+                    if (telemetryCard) telemetryCard.style.display = 'flex';
+                    if (climateCard) climateCard.style.display = 'flex';
                 } else if (section === 'log') {
                     if (logCard) logCard.style.display = 'block';
                 }
+            } else if (currentPage === 'climate') {
+                // Asztali nézet, Fűtés fül: Mérések (az autótöltő része nélkül), alatta a Fűtés kártya, és a Napló
+                if (configCard) configCard.style.display = 'none';
+                if (simCard) simCard.style.display = 'none';
+                if (telemetryCard) telemetryCard.style.display = 'flex';
+                if (climateCard) climateCard.style.display = 'flex';
+                if (logCard) logCard.style.display = 'block';
             } else {
-                // Asztali nézetben mindent visszaállítunk a megszokott grid elrendezésre
+                // Asztali nézet, Autótöltő fül: a megszokott elrendezés, a Fűtés kártya nélkül
                 if (configCard) configCard.style.display = 'flex';
                 if (telemetryCard) telemetryCard.style.display = 'flex';
-                
+                if (climateCard) climateCard.style.display = 'none';
+
                 if (simCard) {
-                    const simToggle = document.getElementById('sim_enabled');
+                    const simToggle = document.getElementById('sim_mode_toggle');
                     simCard.style.display = (simToggle && simToggle.checked) ? 'flex' : 'none';
                 }
                 if (logCard) logCard.style.display = 'block';
-                
+
                 if (section === 'auto' || section === 'schedule' || section === 'force') {
                     selectTab(section);
                 }
+            }
+
+            // A Mérések ablak autótöltős része csak az Autótöltő oldalon látszik
+            const climateView = isMobile ? section === 'climate' : currentPage === 'climate';
+            const chargerBlock = document.getElementById('charger-telemetry-block');
+            const plugStatus = document.getElementById('plug-status');
+            if (chargerBlock) chargerBlock.style.display = climateView ? 'none' : '';
+            if (plugStatus) plugStatus.style.display = climateView ? 'none' : '';
+            if (telemetryCard) {
+                // Az autótöltős rész nélkül a kártya alapmagassága (580 px) üres sávot hagyna
+                telemetryCard.style.minHeight = climateView ? 'auto' : '';
+                // Mobilon a Fűtés nézetben a Mérések marad felül (a HTML-ben a Fűtés kártya van előrébb,
+                // hogy asztali nézetben a bal hasábba essen)
+                telemetryCard.style.order = (isMobile && climateView) ? '-1' : '';
+            }
+        }
+
+        // Fejléc fülei (asztali nézet): Autótöltő / Fűtés
+        function showPage(page) {
+            if (page === 'climate') {
+                showSection('climate');
+            } else {
+                showSection((currentSection === 'climate' || currentSection === 'log') ? 'measurements' : currentSection);
             }
         }
 
@@ -3502,6 +3652,146 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error(err);
             }
         }
+
+        // === FŰTÉS (KLÍMÁK) — 1. fázis ===
+        const CLIMATE_UNIT_COUNT = 3;
+        let climateFormLoaded = false;
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        }
+
+        function buildClimateUnits() {
+            const box = document.getElementById('climate-units');
+            if (!box || box.childElementCount) return;
+            for (let i = 0; i < CLIMATE_UNIT_COUNT; i++) {
+                const div = document.createElement('div');
+                div.className = 'climate-block';
+                div.innerHTML = `
+                    <div class="climate-block-title">${i + 1}. klíma</div>
+                    <div class="climate-grid">
+                        <div class="input-group">
+                            <label for="climate_unit_name_${i}">Név</label>
+                            <input type="text" id="climate_unit_name_${i}" maxlength="40" placeholder="pl. Nappali">
+                        </div>
+                        <div class="input-group">
+                            <label for="climate_unit_ip_${i}">BroadLink IP-cím</label>
+                            <input type="text" id="climate_unit_ip_${i}" placeholder="pl. 192.168.0.60">
+                        </div>
+                    </div>
+                    <div id="climate_unit_status_${i}" class="climate-status"></div>
+                    <div class="climate-btns">
+                        <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'heat_on')">Tanítás fűtés BE</button>
+                        <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'cool_on')">Tanítás hűtés BE</button>
+                        <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'off')">Tanítás KI</button>
+                    </div>
+                    <div class="climate-btns">
+                        <button type="button" class="action-btn action-btn-start" onclick="climateSend(${i}, 'heat_on')">Próba fűtés BE</button>
+                        <button type="button" class="action-btn action-btn-start" onclick="climateSend(${i}, 'cool_on')">Próba hűtés BE</button>
+                        <button type="button" class="action-btn action-btn-stop" onclick="climateSend(${i}, 'off')">Próba KI</button>
+                    </div>`;
+                box.appendChild(div);
+            }
+        }
+
+        function renderClimate(c) {
+            buildClimateUnits();
+            const s = c.sensor || {};
+            let sensorText;
+            if (!s.ip || !s.token_set) {
+                sensorText = 'Nincs beállítva (IP-cím és token kell).';
+            } else if (s.connected) {
+                const t = (typeof s.temperature === 'number') ? s.temperature.toFixed(1) : '–';
+                const h = (typeof s.humidity === 'number') ? s.humidity.toFixed(0) : '–';
+                const when = s.updated ? new Date(s.updated * 1000).toLocaleTimeString('hu-HU') : '';
+                sensorText = `Elérhető — ${t} °C, ${h}% páratartalom (frissítve: ${when})`;
+            } else {
+                sensorText = 'Nem érhető el' + (s.error ? ': ' + s.error : '.');
+            }
+            document.getElementById('climate-sensor-status').textContent = sensorText;
+            document.getElementById('climate_sensor_token').placeholder = s.token_set ? 'beállítva (új megadásához írd be)' : 'nincs beállítva';
+
+            (c.units || []).forEach((u, i) => {
+                const st = document.getElementById('climate_unit_status_' + i);
+                if (!st) return;
+                const busy = {learn_heat_on: 'Fűtés BE kód tanítása folyamatban...', learn_cool_on: 'Hűtés BE kód tanítása folyamatban...',
+                              learn_off: 'KI kód tanítása folyamatban...', send_heat_on: 'Fűtés BE parancs küldése...',
+                              send_cool_on: 'Hűtés BE parancs küldése...', send_off: 'KI parancs küldése...'}[u.busy] || '';
+                const mark = ok => ok ? '✓' : '–';
+                let html = `Fűtés BE: ${mark(u.has_on_heat)} &nbsp;|&nbsp; Hűtés BE: ${mark(u.has_on_cool)} &nbsp;|&nbsp; KI: ${mark(u.has_off)}`;
+                if (busy) {
+                    html += `<br><b>${busy}</b>`;
+                } else if (u.last_result) {
+                    const when = u.last_result_time ? new Date(u.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
+                    html += `<br><span style="color:${u.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(u.last_result)}</span> (${when})`;
+                }
+                st.innerHTML = html;
+            });
+
+            // Az űrlap mezőit csak egyszer töltjük ki (és mentés után), hogy a 2 mp-es
+            // frissítés ne írja felül, amit a felhasználó éppen gépel.
+            if (!climateFormLoaded) {
+                document.getElementById('climate_sensor_ip').value = s.ip || '';
+                (c.units || []).forEach((u, i) => {
+                    const n = document.getElementById('climate_unit_name_' + i);
+                    const ip = document.getElementById('climate_unit_ip_' + i);
+                    if (n) n.value = u.name || '';
+                    if (ip) ip.value = u.broadlink_ip || '';
+                });
+                climateFormLoaded = true;
+            }
+        }
+
+        async function saveClimateConfig() {
+            const units = [];
+            for (let i = 0; i < CLIMATE_UNIT_COUNT; i++) {
+                units.push({
+                    name: document.getElementById('climate_unit_name_' + i).value,
+                    broadlink_ip: document.getElementById('climate_unit_ip_' + i).value
+                });
+            }
+            const body = {
+                sensor: {
+                    ip: document.getElementById('climate_sensor_ip').value,
+                    token: document.getElementById('climate_sensor_token').value
+                },
+                units: units
+            };
+            try {
+                const response = await fetch('/api/climate/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const res = await response.json();
+                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
+                if (res.status === 'success') {
+                    document.getElementById('climate_sensor_token').value = '';
+                    climateFormLoaded = false;
+                    updateStatus();
+                }
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        async function climateAction(url, unit, code) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit: unit, code: code })
+                });
+                const res = await response.json();
+                if (res.status !== 'success' || url.endsWith('/learn')) alert(res.message);
+                updateStatus();
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        function climateLearn(unit, code) { climateAction('/api/climate/learn', unit, code); }
+        function climateSend(unit, code) { climateAction('/api/climate/send', unit, code); }
 
         async function logout() {
             // A böngészőben tárolt kulcsot mindenképp töröljük; hibás oldalon is ki kell tudni lépni.
@@ -3889,6 +4179,20 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_encrypted_json({"status": "error", "message": f"Hibás adatformátum: {e}"})
                 
+        elif self.path in ('/api/climate/config', '/api/climate/learn', '/api/climate/send'):
+            # Klímák (Solar Fűtés) 1. fázis: eszközbeállítások, IR-tanítás, kézi próba-küldés.
+            try:
+                data = self._read_encrypted_body()
+                if self.path == '/api/climate/config':
+                    ok, msg = climate_logic.update_climate_config(data)
+                elif self.path == '/api/climate/learn':
+                    ok, msg = climate_logic.start_learn(data.get("unit"), data.get("code"))
+                else:
+                    ok, msg = climate_logic.send_code(data.get("unit"), data.get("code"))
+                self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
+            except Exception as e:
+                self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
+
         elif self.path == '/api/mode':
             try:
                 mode_data = self._read_encrypted_body()

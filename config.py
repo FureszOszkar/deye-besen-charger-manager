@@ -36,8 +36,22 @@ DEFAULT_CONFIG = {
         {"day": "Péntek", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 16, "override_auto": True}]},
         {"day": "Szombat", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]},
         {"day": "Vasárnap", "enabled": False, "windows": [{"start": "08:00", "stop": "16:00", "amps": 10, "override_auto": True}]}
-    ]
+    ],
+    # Klímák (Solar Fűtés/Hűtés) eszközei: Xiaomi légtisztító (hőmérő) és 3 BroadLink IR-adó.
+    # Üres IP = nincs beállítva. Az IR-kódok base64-ként, a felületről tanítva: klímánként
+    # fűtés BE, hűtés BE és KI (a régi Samsung távirányítók minden gombnyomáskor a teljes
+    # beállítást küldik, ezért a két módhoz külön BE kód kell).
+    "climate": {
+        "sensor": {"ip": "", "token": ""},
+        "units": [
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""}
+        ]
+    }
 }
+
+CLIMATE_UNIT_COUNT = 3
 
 # Inverter IP és port beállítások
 INVERTER_IP = "192.168.0.100"
@@ -66,7 +80,7 @@ DEFAULT_PACKET_PASSWORD = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 # --- SHARED STATE (globális állapot) ---
 shared_state = {
     # Watchdog PONG jelek
-    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time()},
+    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time(), "climate": time.time()},
 
     # Kapcsolatok állapota
     "inverter_connected": False,
@@ -136,7 +150,19 @@ shared_state = {
     "reset_limit": False,
     "manual_start_requested": False,
     "restart_pending_start": False,
-    "web_auth_enabled": True
+    "web_auth_enabled": True,
+
+    # Klímák (Solar Fűtés) nyilvános állapota a felületnek. A légtisztító tokenje és az
+    # IR-kódok NEM kerülnek ide (a CLIMATE_CONFIG-ban vannak), csak az, hogy be vannak-e állítva.
+    "climate": {
+        "sensor": {"ip": "", "token_set": False, "connected": False, "temperature": None,
+                   "humidity": None, "updated": 0.0, "error": ""},
+        "units": [
+            {"name": "", "broadlink_ip": "", "has_on_heat": False, "has_on_cool": False, "has_off": False, "busy": "",
+             "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
+            for _ in range(CLIMATE_UNIT_COUNT)
+        ]
+    }
 }
 
 # Thread-safe lock az állapot módosítása számára
@@ -150,12 +176,50 @@ charger_password = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 WEB_AUTH_ENABLED = True
 WEB_PASSWORD = "admin"
 PBKDF2_ITERATIONS = 100000
+# A klímák teljes (titkos részeket is tartalmazó) konfigurációja; a state_lock védi.
+CLIMATE_CONFIG = json.loads(json.dumps(DEFAULT_CONFIG["climate"]))
+
+
+def normalize_climate_config(raw):
+    """A config.json "climate" blokkjának egységesítése: mindig 1 szenzor + CLIMATE_UNIT_COUNT klíma,
+    csak szöveges mezőkkel; hiányzó/hibás részek helyett üres értékek."""
+    result = json.loads(json.dumps(DEFAULT_CONFIG["climate"]))
+    if not isinstance(raw, dict):
+        return result
+    sensor = raw.get("sensor")
+    if isinstance(sensor, dict):
+        for key in ("ip", "token"):
+            if isinstance(sensor.get(key), str):
+                result["sensor"][key] = sensor[key].strip()
+    units = raw.get("units")
+    if isinstance(units, list):
+        for i, unit in enumerate(units[:CLIMATE_UNIT_COUNT]):
+            if not isinstance(unit, dict):
+                continue
+            for key in ("name", "broadlink_ip", "ir_on_heat", "ir_on_cool", "ir_off"):
+                if isinstance(unit.get(key), str):
+                    result["units"][i][key] = unit[key].strip()
+    return result
+
+
+def refresh_climate_public_state():
+    """A shared_state["climate"] beállítás-eredetű mezőinek frissítése a CLIMATE_CONFIG-ból
+    (a futás közbeni mezők — mérés, utolsó eredmény — megmaradnak). A hívó tartsa a state_lock-ot."""
+    pub = shared_state["climate"]
+    pub["sensor"]["ip"] = CLIMATE_CONFIG["sensor"]["ip"]
+    pub["sensor"]["token_set"] = bool(CLIMATE_CONFIG["sensor"]["token"])
+    for i, unit in enumerate(CLIMATE_CONFIG["units"]):
+        pub["units"][i]["name"] = unit["name"]
+        pub["units"][i]["broadlink_ip"] = unit["broadlink_ip"]
+        pub["units"][i]["has_on_heat"] = bool(unit["ir_on_heat"])
+        pub["units"][i]["has_on_cool"] = bool(unit["ir_on_cool"])
+        pub["units"][i]["has_off"] = bool(unit["ir_off"])
 
 # --- KONFIGURÁCIÓ KEZELÉS ---
 def load_config():
     global shared_state, CHARGER_NAME, CHARGER_MAC, charger_password
     global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
-    global _last_initiated_session_id
+    global _last_initiated_session_id, CLIMATE_CONFIG
     config = DEFAULT_CONFIG.copy()
     
     if os.path.exists(CONFIG_FILE):
@@ -243,7 +307,11 @@ def load_config():
             shared_state["auto_enabled"] = False
             shared_state["schedule_enabled"] = False
             shared_state["force_submode"] = "schedule"
-            
+
+        # Klímák (Solar Fűtés) eszközbeállításai
+        CLIMATE_CONFIG = normalize_climate_config(config.get("climate"))
+        refresh_climate_public_state()
+
     # Töltő BLE paraméterek betöltése
     CHARGER_NAME = config.get("charger_name", "ACP#DefaultName")
     CHARGER_MAC = config.get("charger_mac", "00:11:22:33:44:55")
@@ -323,7 +391,8 @@ def save_config_file():
             "last_initiated_session_id": _last_initiated_session_id,
             "session_energy_accumulator": shared_state.get("session_energy_accumulator", 0.0),
             "session_last_time": shared_state.get("session_last_time", 0.0),
-            "session_last_power": shared_state.get("session_last_power", 0.0)
+            "session_last_power": shared_state.get("session_last_power", 0.0),
+            "climate": json.loads(json.dumps(CLIMATE_CONFIG))
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

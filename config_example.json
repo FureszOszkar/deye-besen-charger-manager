@@ -32,5 +32,13 @@
     "stop_soc": 0,
     "started_by_controller": false,
     "last_charge": {},
-    "last_initiated_session_id": ""
+    "last_initiated_session_id": "",
+    "climate": {
+        "sensor": {"ip": "", "token": ""},
+        "units": [
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""}
+        ]
+    }
 }
