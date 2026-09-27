@@ -1238,9 +1238,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             padding: 0.4rem 0.7rem;
             font-size: 0.8rem;
         }
+        .climate-mode-switch {
+            display: inline-flex;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .climate-mode-btn {
+            background: rgba(15, 23, 42, 0.6);
+            border: none;
+            color: var(--text-muted);
+            padding: 0.4rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .climate-mode-btn.active {
+            color: var(--primary);
+            background: rgba(56, 189, 248, 0.12);
+        }
+        .climate-unit-settings {
+            display: grid;
+            grid-template-columns: 7rem 1fr 1fr;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .climate-unit-settings input {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            padding: 0.45rem;
+            border-radius: 6px;
+            color: var(--text-color);
+            text-align: center;
+            min-width: 0;
+        }
+        .climate-col-head {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .climate-unit-label {
+            font-size: 0.85rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .climate-devices {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.6rem 0.75rem;
+        }
+        .climate-devices summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .climate-devices[open] summary {
+            margin-bottom: 0.75rem;
+        }
+        #climate-telemetry-block {
+            margin-top: 0.8rem;
+        }
+        .climate-status-row {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            padding: 0.4rem 0;
+            border-top: 1px solid var(--border-color);
+        }
         @media (max-width: 600px) {
             .climate-grid {
                 grid-template-columns: 1fr;
+            }
+            .climate-unit-settings {
+                grid-template-columns: 5rem 1fr 1fr;
             }
         }
 
@@ -1912,27 +1980,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <!-- FŰTÉS (KLÍMÁK) — csak a Fűtés fülön; a rácsban a bal hasábba esik (a Mérések előtt) -->
         <div class="card" id="climate-card" style="display: none; flex-direction: column; gap: 1rem;">
             <div class="card-title">Klímavezérlés</div>
+            <!-- A beállító mezők a 2. fázisban kapnak működést; addig csak megjelennek (letiltva). -->
+            <div class="climate-status">A beállítások a 2. fázisban (automata szabályok) kapnak működést.</div>
 
-            <div class="climate-block">
-                <div class="climate-block-title">Légtisztító (hőmérő)</div>
-                <div id="climate-sensor-status" class="climate-status">Betöltés...</div>
-                <div class="climate-grid">
-                    <div class="input-group">
-                        <label for="climate_sensor_ip">IP-cím</label>
-                        <input type="text" id="climate_sensor_ip" placeholder="pl. 192.168.0.50">
-                    </div>
-                    <div class="input-group">
-                        <label for="climate_sensor_token">Token (32 karakter)</label>
-                        <input type="password" id="climate_sensor_token" autocomplete="off" placeholder="nincs beállítva">
-                    </div>
+            <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+                <div class="climate-mode-switch">
+                    <button type="button" class="climate-mode-btn active" disabled>Fűtés</button>
+                    <button type="button" class="climate-mode-btn" disabled>Hűtés</button>
+                </div>
+                <label class="checkbox-group"><input type="checkbox" id="climate_auto_enabled" disabled> Automata bekapcsolva</label>
+            </div>
+
+            <div class="climate-block-title">Bekapcsolás és kikapcsolás</div>
+            <div class="climate-grid">
+                <div class="input-group">
+                    <label for="climate_soc">Akkuszint (%)</label>
+                    <input type="number" id="climate_soc" disabled>
+                </div>
+                <div class="input-group">
+                    <label for="climate_target_temp">Célhőmérséklet (°C)</label>
+                    <input type="number" id="climate_target_temp" disabled>
+                </div>
+                <div class="input-group">
+                    <label for="climate_on_minutes">Bekapcsolási idő (perc)</label>
+                    <input type="number" id="climate_on_minutes" disabled>
+                </div>
+                <div class="input-group">
+                    <label for="climate_off_minutes">Kikapcsolási idő (perc)</label>
+                    <input type="number" id="climate_off_minutes" disabled>
                 </div>
             </div>
 
-            <div id="climate-units"></div>
-
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveClimateConfig()">Beállítások mentése</button>
+            <div class="climate-block-title">Klímánként</div>
+            <div class="climate-unit-settings">
+                <span></span><span class="climate-col-head">Visszatermelés a bekapcsoláshoz (W)</span><span class="climate-col-head">Hőmérséklet-eltolás (°C)</span>
+                <span class="climate-unit-label" id="climate_unit_label_0">1. klíma</span><input type="number" disabled><input type="number" disabled>
+                <span class="climate-unit-label" id="climate_unit_label_1">2. klíma</span><input type="number" disabled><input type="number" disabled>
+                <span class="climate-unit-label" id="climate_unit_label_2">3. klíma</span><input type="number" disabled><input type="number" disabled>
             </div>
+
+            <div>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" disabled>Beállítások mentése</button>
+            </div>
+
+            <!-- Ritkán használt: IR-kód tanítás és kézi próba. Alapból becsukva. -->
+            <details class="climate-devices">
+                <summary>Eszközök (tanítás, próba)</summary>
+                <div id="climate-units"></div>
+            </details>
         </div>
 
         <!-- JOBB OLDAL: ÉLŐ TELEMETRIA ÉS MÉRÉSEK -->
@@ -1991,6 +2086,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div id="battery-soc" class="metric-value">0%</div>
                     <div id="battery-soc-label" class="metric-value-sub">Inverter telemetria (Wi-Fi)</div>
                 </div>
+            </div>
+
+            <!-- KLÍMAVEZÉRLÉS FÜL: a hőmérő és a klímák állapota (az autótöltős rész helyén) -->
+            <div id="climate-telemetry-block" style="display: none;">
+                <div class="climate-block-title">Hőmérő és klímák</div>
+                <div id="climate-sensor-status" class="climate-status-row">Betöltés...</div>
+                <div id="climate-unit-status-0" class="climate-status-row"></div>
+                <div id="climate-unit-status-1" class="climate-status-row"></div>
+                <div id="climate-unit-status-2" class="climate-status-row"></div>
             </div>
 
             <div id="charger-telemetry-block">
@@ -3464,6 +3568,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const chargerBlock = document.getElementById('charger-telemetry-block');
             const plugStatus = document.getElementById('plug-status');
             if (chargerBlock) chargerBlock.style.display = climateView ? 'none' : '';
+            const climateBlock = document.getElementById('climate-telemetry-block');
+            if (climateBlock) climateBlock.style.display = climateView ? '' : 'none';
             if (plugStatus) plugStatus.style.display = climateView ? 'none' : '';
             if (telemetryCard) {
                 // Az autótöltős rész nélkül a kártya alapmagassága (580 px) üres sávot hagyna
@@ -3653,14 +3759,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // === FŰTÉS (KLÍMÁK) — 1. fázis ===
+        // === KLÍMAVEZÉRLÉS ===
         const CLIMATE_UNIT_COUNT = 3;
-        let climateFormLoaded = false;
 
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
         }
 
+        function climateUnitName(u, i) {
+            return `${i + 1}. ` + (u && u.name ? u.name : 'klíma');
+        }
+
+        // A becsukható "Eszközök (tanítás, próba)" rész gombjai (egyszer épül fel)
         function buildClimateUnits() {
             const box = document.getElementById('climate-units');
             if (!box || box.childElementCount) return;
@@ -3668,18 +3778,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const div = document.createElement('div');
                 div.className = 'climate-block';
                 div.innerHTML = `
-                    <div class="climate-block-title">${i + 1}. klíma</div>
-                    <div class="climate-grid">
-                        <div class="input-group">
-                            <label for="climate_unit_name_${i}">Név</label>
-                            <input type="text" id="climate_unit_name_${i}" maxlength="40" placeholder="pl. Nappali">
-                        </div>
-                        <div class="input-group">
-                            <label for="climate_unit_ip_${i}">BroadLink IP-cím</label>
-                            <input type="text" id="climate_unit_ip_${i}" placeholder="pl. 192.168.0.60">
-                        </div>
-                    </div>
-                    <div id="climate_unit_status_${i}" class="climate-status"></div>
+                    <div class="climate-block-title" id="climate_dev_title_${i}">${i + 1}. klíma</div>
+                    <div id="climate_unit_result_${i}" class="climate-status"></div>
                     <div class="climate-btns">
                         <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'heat_on')">Tanítás fűtés BE</button>
                         <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'cool_on')">Tanítás hűtés BE</button>
@@ -3696,83 +3796,56 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function renderClimate(c) {
             buildClimateUnits();
+
+            // Mérések kártya: hőmérő
             const s = c.sensor || {};
             let sensorText;
             if (!s.ip || !s.token_set) {
-                sensorText = 'Nincs beállítva (IP-cím és token kell).';
+                sensorText = 'Légtisztító: nincs beállítva (IP-cím és token a config.json-ban).';
             } else if (s.connected) {
                 const t = (typeof s.temperature === 'number') ? s.temperature.toFixed(1) : '–';
                 const h = (typeof s.humidity === 'number') ? s.humidity.toFixed(0) : '–';
                 const when = s.updated ? new Date(s.updated * 1000).toLocaleTimeString('hu-HU') : '';
-                sensorText = `Elérhető — ${t} °C, ${h}% páratartalom (frissítve: ${when})`;
+                sensorText = `Légtisztító: elérhető — ${t} °C, ${h}% páratartalom (frissítve: ${when})`;
             } else {
-                sensorText = 'Nem érhető el' + (s.error ? ': ' + s.error : '.');
+                sensorText = 'Légtisztító: nem érhető el' + (s.error ? ' — ' + s.error : '.');
             }
             document.getElementById('climate-sensor-status').textContent = sensorText;
-            document.getElementById('climate_sensor_token').placeholder = s.token_set ? 'beállítva (új megadásához írd be)' : 'nincs beállítva';
 
+            const mark = ok => ok ? '✓' : '–';
             (c.units || []).forEach((u, i) => {
-                const st = document.getElementById('climate_unit_status_' + i);
-                if (!st) return;
-                const busy = {learn_heat_on: 'Fűtés BE kód tanítása folyamatban...', learn_cool_on: 'Hűtés BE kód tanítása folyamatban...',
-                              learn_off: 'KI kód tanítása folyamatban...', send_heat_on: 'Fűtés BE parancs küldése...',
-                              send_cool_on: 'Hűtés BE parancs küldése...', send_off: 'KI parancs küldése...'}[u.busy] || '';
-                const mark = ok => ok ? '✓' : '–';
-                let html = `Fűtés BE: ${mark(u.has_on_heat)} &nbsp;|&nbsp; Hűtés BE: ${mark(u.has_on_cool)} &nbsp;|&nbsp; KI: ${mark(u.has_off)}`;
-                if (busy) {
-                    html += `<br><b>${busy}</b>`;
-                } else if (u.last_result) {
-                    const when = u.last_result_time ? new Date(u.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
-                    html += `<br><span style="color:${u.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(u.last_result)}</span> (${when})`;
+                const name = climateUnitName(u, i);
+
+                // Mérések kártya: klímák állapota
+                const st = document.getElementById('climate-unit-status-' + i);
+                if (st) {
+                    st.textContent = u.broadlink_ip
+                        ? `${name} (${u.broadlink_ip}) · Fűtés BE ${mark(u.has_on_heat)} · Hűtés BE ${mark(u.has_on_cool)} · KI ${mark(u.has_off)}`
+                        : `${name} — nincs beállítva`;
                 }
-                st.innerHTML = html;
+
+                // Beállítások: a klíma neve a sor elején
+                const label = document.getElementById('climate_unit_label_' + i);
+                if (label) label.textContent = name;
+
+                // Eszközök rész: név + az utolsó művelet eredménye
+                const title = document.getElementById('climate_dev_title_' + i);
+                if (title) title.textContent = name + (u.broadlink_ip ? ` (${u.broadlink_ip})` : ' — nincs BroadLink IP');
+                const res = document.getElementById('climate_unit_result_' + i);
+                if (res) {
+                    const busy = {learn_heat_on: 'Fűtés BE kód tanítása folyamatban...', learn_cool_on: 'Hűtés BE kód tanítása folyamatban...',
+                                  learn_off: 'KI kód tanítása folyamatban...', send_heat_on: 'Fűtés BE parancs küldése...',
+                                  send_cool_on: 'Hűtés BE parancs küldése...', send_off: 'KI parancs küldése...'}[u.busy] || '';
+                    let html = `Fűtés BE: ${mark(u.has_on_heat)} &nbsp;|&nbsp; Hűtés BE: ${mark(u.has_on_cool)} &nbsp;|&nbsp; KI: ${mark(u.has_off)}`;
+                    if (busy) {
+                        html += `<br><b>${busy}</b>`;
+                    } else if (u.last_result) {
+                        const when = u.last_result_time ? new Date(u.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
+                        html += `<br><span style="color:${u.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(u.last_result)}</span> (${when})`;
+                    }
+                    res.innerHTML = html;
+                }
             });
-
-            // Az űrlap mezőit csak egyszer töltjük ki (és mentés után), hogy a 2 mp-es
-            // frissítés ne írja felül, amit a felhasználó éppen gépel.
-            if (!climateFormLoaded) {
-                document.getElementById('climate_sensor_ip').value = s.ip || '';
-                (c.units || []).forEach((u, i) => {
-                    const n = document.getElementById('climate_unit_name_' + i);
-                    const ip = document.getElementById('climate_unit_ip_' + i);
-                    if (n) n.value = u.name || '';
-                    if (ip) ip.value = u.broadlink_ip || '';
-                });
-                climateFormLoaded = true;
-            }
-        }
-
-        async function saveClimateConfig() {
-            const units = [];
-            for (let i = 0; i < CLIMATE_UNIT_COUNT; i++) {
-                units.push({
-                    name: document.getElementById('climate_unit_name_' + i).value,
-                    broadlink_ip: document.getElementById('climate_unit_ip_' + i).value
-                });
-            }
-            const body = {
-                sensor: {
-                    ip: document.getElementById('climate_sensor_ip').value,
-                    token: document.getElementById('climate_sensor_token').value
-                },
-                units: units
-            };
-            try {
-                const response = await fetch('/api/climate/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                const res = await response.json();
-                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
-                if (res.status === 'success') {
-                    document.getElementById('climate_sensor_token').value = '';
-                    climateFormLoaded = false;
-                    updateStatus();
-                }
-            } catch (err) {
-                alert('Hiba: ' + err);
-            }
         }
 
         async function climateAction(url, unit, code) {
@@ -4179,13 +4252,12 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_encrypted_json({"status": "error", "message": f"Hibás adatformátum: {e}"})
                 
-        elif self.path in ('/api/climate/config', '/api/climate/learn', '/api/climate/send'):
-            # Klímák (Solar Fűtés) 1. fázis: eszközbeállítások, IR-tanítás, kézi próba-küldés.
+        elif self.path in ('/api/climate/learn', '/api/climate/send'):
+            # Klímavezérlés: IR-tanítás és kézi próba-küldés. Az eszközök címe, a légtisztító
+            # tokenje és a klímák neve csak a config.json-ban állítható (mint az inverter IP-je).
             try:
                 data = self._read_encrypted_body()
-                if self.path == '/api/climate/config':
-                    ok, msg = climate_logic.update_climate_config(data)
-                elif self.path == '/api/climate/learn':
+                if self.path == '/api/climate/learn':
                     ok, msg = climate_logic.start_learn(data.get("unit"), data.get("code"))
                 else:
                     ok, msg = climate_logic.send_code(data.get("unit"), data.get("code"))

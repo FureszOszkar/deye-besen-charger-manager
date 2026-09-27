@@ -2,12 +2,11 @@
 
 * run_climate_polling(): a légtisztító hőmérséklet/páratartalom kiolvasása percenként
   (Watchdog alatt, saját "climate" PONG-gal).
-* A felület (dashboard) által hívott műveletek: beállítások mentése, IR-kód tanítása,
-  kézi próba-küldés. Ezek a webszerver szálaiból futnak; a tanítás külön háttérszálban.
+* A felület (dashboard) által hívott műveletek: IR-kód tanítása és kézi próba-küldés. Az eszközök
+  címe, a légtisztító tokenje és a klímák neve csak a config.json-ban állítható. Ezek a webszerver szálaiból futnak; a tanítás külön háttérszálban.
 """
 import asyncio
 import base64
-import ipaddress
 import threading
 import time
 
@@ -99,70 +98,6 @@ async def run_climate_polling():
             waited += PONG_STEP_S
 
 
-# --- Beállítások (felület) ----------------------------------------------------------
-
-def _valid_ip(value):
-    if value == "":
-        return True
-    try:
-        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
-    except ValueError:
-        return False
-
-
-def update_climate_config(data):
-    """A felületről érkező eszközbeállítások ATOMI mentése: előbb minden mező ellenőrzése,
-    csak utána alkalmazás. A token csak akkor változik, ha újat adtak meg (üres = marad).
-    Visszatérés: (siker, üzenet)."""
-    if not isinstance(data, dict):
-        return False, "Hibás adatformátum."
-    sensor = data.get("sensor")
-    units = data.get("units")
-    if not isinstance(sensor, dict) or not isinstance(units, list) or len(units) != cfg.CLIMATE_UNIT_COUNT:
-        return False, "Hibás adatformátum."
-
-    sensor_ip = sensor.get("ip")
-    new_token = sensor.get("token", "")
-    clear_token = sensor.get("token_clear", False)
-    if not isinstance(sensor_ip, str) or not _valid_ip(sensor_ip.strip()):
-        return False, "A légtisztító IP-címe érvénytelen."
-    if not isinstance(new_token, str) or not isinstance(clear_token, bool):
-        return False, "Hibás adatformátum."
-    new_token = new_token.strip().lower()
-    if new_token:
-        try:
-            if len(bytes.fromhex(new_token)) != 16:
-                raise ValueError
-        except ValueError:
-            return False, "A token 32 hexadecimális karakter kell legyen."
-
-    parsed_units = []
-    for i, unit in enumerate(units):
-        if not isinstance(unit, dict):
-            return False, "Hibás adatformátum."
-        name = unit.get("name")
-        ip = unit.get("broadlink_ip")
-        if not isinstance(name, str) or len(name.strip()) > 40:
-            return False, f"A(z) {i + 1}. klíma neve érvénytelen (legfeljebb 40 karakter)."
-        if not isinstance(ip, str) or not _valid_ip(ip.strip()):
-            return False, f"A(z) {i + 1}. klíma BroadLink IP-címe érvénytelen."
-        parsed_units.append((name.strip(), ip.strip()))
-
-    with state_lock:
-        cfg.CLIMATE_CONFIG["sensor"]["ip"] = sensor_ip.strip()
-        if clear_token:
-            cfg.CLIMATE_CONFIG["sensor"]["token"] = ""
-        elif new_token:
-            cfg.CLIMATE_CONFIG["sensor"]["token"] = new_token
-        for i, (name, ip) in enumerate(parsed_units):
-            cfg.CLIMATE_CONFIG["units"][i]["name"] = name
-            cfg.CLIMATE_CONFIG["units"][i]["broadlink_ip"] = ip
-        cfg.refresh_climate_public_state()
-    save_config_file()
-    log_message("[KLÍMA] Eszközbeállítások mentve.")
-    return True, "Mentve."
-
-
 # --- IR-kód tanítása és kézi küldése (felület) -----------------------------------------
 
 def _check_unit_args(unit, which):
@@ -182,7 +117,7 @@ def start_learn(unit, which):
         ip = cfg.CLIMATE_CONFIG["units"][unit]["broadlink_ip"]
         sim = shared_state["simulation"]
     if not ip and not sim:
-        return False, "Előbb add meg és mentsd a BroadLink IP-címét."
+        return False, "Nincs megadva a BroadLink IP-címe (config.json)."
     if not _unit_locks[unit].acquire(blocking=False):
         return False, "Ennél a klímánál már folyamatban van egy művelet."
     with state_lock:
@@ -228,7 +163,7 @@ def send_code(unit, which):
     if not code:
         return False, f"A(z) {_CODE_LABELS[which]} kód még nincs megtanítva."
     if not ip and not sim:
-        return False, "Nincs megadva a BroadLink IP-címe."
+        return False, "Nincs megadva a BroadLink IP-címe (config.json)."
     if not _unit_locks[unit].acquire(blocking=False):
         return False, "Ennél a klímánál már folyamatban van egy művelet."
     label = _unit_label(unit)
