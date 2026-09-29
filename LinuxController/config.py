@@ -53,6 +53,19 @@ DEFAULT_CONFIG = {
 
 CLIMATE_UNIT_COUNT = 3
 
+# Árnyékolás: redőny és napellenző rádiós (RF) vezérlése egy BroadLink RM4 Pro-val, napi időzítővel.
+# A BroadLink IP-je csak itt állítható; az időzítők és a megtanított kódok a felületről mentődnek ide.
+SHADING_DEVICES = ("roller", "awning")
+WEEK_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
+DEFAULT_CONFIG["shading"] = {
+    "broadlink_ip": "",
+    "devices": {
+        dev: {"enabled": False, "rf_up": "", "rf_down": "",
+              "schedule": [{"day": d, "up": "", "down": ""} for d in WEEK_DAYS]}
+        for dev in SHADING_DEVICES
+    }
+}
+
 # Inverter IP és port beállítások
 INVERTER_IP = "192.168.0.100"
 INVERTER_PORT = 8899
@@ -80,7 +93,7 @@ DEFAULT_PACKET_PASSWORD = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 # --- SHARED STATE (globális állapot) ---
 shared_state = {
     # Watchdog PONG jelek
-    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time(), "climate": time.time()},
+    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time(), "climate": time.time(), "shading": time.time()},
 
     # Kapcsolatok állapota
     "inverter_connected": False,
@@ -163,6 +176,17 @@ shared_state = {
              "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
             for _ in range(CLIMATE_UNIT_COUNT)
         ]
+    },
+
+    # Árnyékolás nyilvános állapota (a megtanított RF-kódok nélkül, csak hogy megvannak-e)
+    "shading": {
+        "broadlink_ip": "",
+        "devices": {
+            dev: {"enabled": False, "schedule": [{"day": d, "up": "", "down": ""} for d in WEEK_DAYS],
+                  "has_up": False, "has_down": False, "busy": "", "stage": "",
+                  "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
+            for dev in SHADING_DEVICES
+        }
     }
 }
 
@@ -203,6 +227,53 @@ def normalize_climate_config(raw):
     return result
 
 
+SHADING_CONFIG = json.loads(json.dumps(DEFAULT_CONFIG["shading"]))
+
+
+def normalize_shading_config(raw):
+    """A config.json "shading" blokkjának egységesítése: mindkét eszköz, 7 nap; hibás részek helyett
+    az alapértékek (kikapcsolt időzítő, üres időpont)."""
+    result = json.loads(json.dumps(DEFAULT_CONFIG["shading"]))
+    if not isinstance(raw, dict):
+        return result
+    if isinstance(raw.get("broadlink_ip"), str):
+        result["broadlink_ip"] = raw["broadlink_ip"].strip()
+    devices = raw.get("devices")
+    if not isinstance(devices, dict):
+        return result
+    for dev in SHADING_DEVICES:
+        src = devices.get(dev)
+        if not isinstance(src, dict):
+            continue
+        dst = result["devices"][dev]
+        dst["enabled"] = bool(src.get("enabled", False))
+        for key in ("rf_up", "rf_down"):
+            if isinstance(src.get(key), str):
+                dst[key] = src[key].strip()
+        sched = src.get("schedule")
+        if isinstance(sched, list):
+            for i, day in enumerate(sched[:len(WEEK_DAYS)]):
+                if isinstance(day, dict):
+                    for key in ("up", "down"):
+                        if isinstance(day.get(key), str):
+                            dst["schedule"][i][key] = day[key].strip()
+    return result
+
+
+def refresh_shading_public_state():
+    """A shared_state["shading"] frissítése a SHADING_CONFIG-ból (a futás közbeni mezők megmaradnak).
+    A hívó tartsa a state_lock-ot."""
+    pub = shared_state["shading"]
+    pub["broadlink_ip"] = SHADING_CONFIG["broadlink_ip"]
+    for dev in SHADING_DEVICES:
+        src = SHADING_CONFIG["devices"][dev]
+        dst = pub["devices"][dev]
+        dst["enabled"] = src["enabled"]
+        dst["schedule"] = json.loads(json.dumps(src["schedule"]))
+        dst["has_up"] = bool(src["rf_up"])
+        dst["has_down"] = bool(src["rf_down"])
+
+
 def refresh_climate_public_state():
     """A shared_state["climate"] beállítás-eredetű mezőinek frissítése a CLIMATE_CONFIG-ból
     (a futás közbeni mezők — mérés, utolsó eredmény — megmaradnak). A hívó tartsa a state_lock-ot."""
@@ -220,7 +291,7 @@ def refresh_climate_public_state():
 def load_config():
     global shared_state, CHARGER_NAME, CHARGER_MAC, charger_password
     global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
-    global _last_initiated_session_id, CLIMATE_CONFIG
+    global _last_initiated_session_id, CLIMATE_CONFIG, SHADING_CONFIG
     config = DEFAULT_CONFIG.copy()
     
     if os.path.exists(CONFIG_FILE):
@@ -313,6 +384,10 @@ def load_config():
         CLIMATE_CONFIG = normalize_climate_config(config.get("climate"))
         refresh_climate_public_state()
 
+        # Árnyékolás (redőny, napellenző): időzítők és RF-kódok
+        SHADING_CONFIG = normalize_shading_config(config.get("shading"))
+        refresh_shading_public_state()
+
     # Töltő BLE paraméterek betöltése
     CHARGER_NAME = config.get("charger_name", "ACP#DefaultName")
     CHARGER_MAC = config.get("charger_mac", "00:11:22:33:44:55")
@@ -393,7 +468,8 @@ def save_config_file():
             "session_energy_accumulator": shared_state.get("session_energy_accumulator", 0.0),
             "session_last_time": shared_state.get("session_last_time", 0.0),
             "session_last_power": shared_state.get("session_last_power", 0.0),
-            "climate": json.loads(json.dumps(CLIMATE_CONFIG))
+            "climate": json.loads(json.dumps(CLIMATE_CONFIG)),
+            "shading": json.loads(json.dumps(SHADING_CONFIG))
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

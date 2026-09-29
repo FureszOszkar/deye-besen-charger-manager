@@ -100,6 +100,62 @@ def broadlink_learn(ip, timeout_s=LEARN_TIMEOUT_S):
     raise ClimateDeviceError(f"{timeout_s} másodperc alatt nem érkezett távirányító-jel.")
 
 
+RF_SWEEP_TIMEOUT_S = 30        # ennyi ideig keresi a frekvenciát (a gombot nyomva kell tartani)
+RF_CAPTURE_TIMEOUT_S = 30      # ennyi ideig vár a jel rögzítésére (a gombot egyszer kell megnyomni)
+
+
+def broadlink_learn_rf(ip, on_stage=None, sweep_timeout_s=RF_SWEEP_TIMEOUT_S,
+                       capture_timeout_s=RF_CAPTURE_TIMEOUT_S):
+    """Rádiós (RF) kód tanítása két lépésben (csak az RF-képes eszközök, pl. RM4 Pro):
+    1. frekvenciakeresés — a felhasználó NYOMVA TARTJA a távirányító gombját;
+    2. a jel rögzítése — a felhasználó EGYSZER megnyomja a gombot.
+    Az on_stage("hold" / "press") a felületnek jelzi a lépést. Visszatérés: a kód base64-ként."""
+    dev = _broadlink_connect(ip)
+    if not hasattr(dev, "sweep_frequency"):
+        raise ClimateDeviceError(f"A(z) {ip} eszköz nem tud rádiós (RF) jelet tanulni (ehhez RM4 Pro kell).")
+    try:
+        dev.sweep_frequency()
+    except Exception as e:
+        raise ClimateDeviceError(f"A frekvenciakeresés indítása sikertelen ({ip}): {e}") from e
+    if on_stage:
+        on_stage("hold")
+    frequency = None
+    deadline = time.monotonic() + sweep_timeout_s
+    while time.monotonic() < deadline:
+        time.sleep(LEARN_POLL_S)
+        try:
+            found, freq = dev.check_frequency()
+        except Exception as e:
+            raise ClimateDeviceError(f"A frekvenciakeresés közben hiba történt ({ip}): {e}") from e
+        if found:
+            frequency = freq
+            break
+    if frequency is None:
+        try:
+            dev.cancel_sweep_frequency()
+        except Exception:
+            pass
+        raise ClimateDeviceError(f"{sweep_timeout_s} másodperc alatt nem sikerült megtalálni a távirányító frekvenciáját.")
+    if on_stage:
+        on_stage("press")
+    try:
+        dev.find_rf_packet(frequency)
+    except Exception as e:
+        raise ClimateDeviceError(f"A rádiós tanító mód indítása sikertelen ({ip}): {e}") from e
+    deadline = time.monotonic() + capture_timeout_s
+    while time.monotonic() < deadline:
+        time.sleep(LEARN_POLL_S)
+        try:
+            data = dev.check_data()
+        except (ReadError, StorageError):
+            continue
+        except Exception as e:
+            raise ClimateDeviceError(f"A rádiós tanítás közben hiba történt ({ip}): {e}") from e
+        if data:
+            return base64.b64encode(data).decode("ascii")
+    raise ClimateDeviceError(f"{capture_timeout_s} másodperc alatt nem érkezett rádiós jel.")
+
+
 # --- Xiaomi légtisztító (miIO / MiOT) ---------------------------------------------
 
 MIIO_PORT = 54321

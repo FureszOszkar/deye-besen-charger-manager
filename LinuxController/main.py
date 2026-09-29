@@ -15,6 +15,7 @@ from charging_logic import (
 )
 from simulation import run_simulation_telemetry, console_simulation_input
 from climate_logic import run_climate_polling
+from shading_logic import run_shading_timer
 
 # --- ERŐFORRÁS-FIGYELÉS (fájlleírók) ---
 # Egy szivárgó forrás (elárvult kapcsolatok, csövek, szálak) lassan elfogyasztja a
@@ -108,7 +109,8 @@ async def main():
         "inverter": asyncio.create_task(run_inverter_polling()),
         "ble": asyncio.create_task(run_ble_client()),
         "controller": asyncio.create_task(run_charge_controller()),
-        "climate": asyncio.create_task(run_climate_polling())
+        "climate": asyncio.create_task(run_climate_polling()),
+        "shading": asyncio.create_task(run_shading_timer())
     }
 
     import time
@@ -154,6 +156,8 @@ async def main():
                     tasks["controller"] = asyncio.create_task(run_charge_controller())
                 elif task_name == "climate":
                     tasks["climate"] = asyncio.create_task(run_climate_polling())
+                elif task_name == "shading":
+                    tasks["shading"] = asyncio.create_task(run_shading_timer())
                 continue
 
             # 2. Befagyás ellenőrzése (Freeze - 30 másodperces limit)

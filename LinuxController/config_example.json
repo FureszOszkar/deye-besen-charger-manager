@@ -40,5 +40,34 @@
             {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
             {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""}
         ]
+    },
+    "shading": {
+        "broadlink_ip": "",
+        "devices": {
+            "roller": {
+                "enabled": false, "rf_up": "", "rf_down": "",
+                "schedule": [
+                    {"day": "Hétfő", "up": "", "down": ""},
+                    {"day": "Kedd", "up": "", "down": ""},
+                    {"day": "Szerda", "up": "", "down": ""},
+                    {"day": "Csütörtök", "up": "", "down": ""},
+                    {"day": "Péntek", "up": "", "down": ""},
+                    {"day": "Szombat", "up": "", "down": ""},
+                    {"day": "Vasárnap", "up": "", "down": ""}
+                ]
+            },
+            "awning": {
+                "enabled": false, "rf_up": "", "rf_down": "",
+                "schedule": [
+                    {"day": "Hétfő", "up": "", "down": ""},
+                    {"day": "Kedd", "up": "", "down": ""},
+                    {"day": "Szerda", "up": "", "down": ""},
+                    {"day": "Csütörtök", "up": "", "down": ""},
+                    {"day": "Péntek", "up": "", "down": ""},
+                    {"day": "Szombat", "up": "", "down": ""},
+                    {"day": "Vasárnap", "up": "", "down": ""}
+                ]
+            }
+        }
     }
 }

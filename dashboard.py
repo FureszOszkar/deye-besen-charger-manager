@@ -17,6 +17,7 @@ from config import (
     WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
 )
 import climate_logic
+import shading_logic
 
 # --- ÜTEMEZÉS VALIDÁCIÓ ---
 FORCED_SCHEDULE_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
@@ -567,14 +568,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         /* Egységes cián szín az aktív automatizmus jelvényeknek feltűnő glow hatással */
-        #badge-toggle-auto.active, #badge-toggle-schedule.active, #badge-toggle-climate.active {
+        #badge-toggle-auto.active, #badge-toggle-schedule.active, #badge-toggle-climate.active, #badge-toggle-shading.active {
             background: rgba(34, 211, 238, 0.25);
             border-color: rgba(34, 211, 238, 0.9);
             color: #22d3ee;
             box-shadow: 0 0 16px rgba(34, 211, 238, 0.7), 0 0 32px rgba(34, 211, 238, 0.35), inset 0 0 6px rgba(34, 211, 238, 0.4);
             font-weight: 700;
         }
-        #badge-toggle-auto.active .badge-dot, #badge-toggle-schedule.active .badge-dot, #badge-toggle-climate.active .badge-dot {
+        #badge-toggle-auto.active .badge-dot, #badge-toggle-schedule.active .badge-dot, #badge-toggle-climate.active .badge-dot, #badge-toggle-shading.active .badge-dot {
             background-color: #22d3ee;
             box-shadow: 0 0 8px #ffffff, 0 0 18px #22d3ee, 0 0 28px #22d3ee;
         }
@@ -1321,6 +1322,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .climate-devices[open] summary {
             margin-bottom: 0.75rem;
         }
+        .shading-card {
+            min-height: auto;
+        }
+        .shading-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .shading-table th {
+            text-align: left;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            padding: 0.2rem 0.3rem;
+        }
+        .shading-table td {
+            padding: 0.2rem 0.3rem;
+        }
+        .shading-table input[type="time"] {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-color);
+            padding: 0.3rem 0.4rem;
+            width: 100%;
+            min-width: 0;
+            color-scheme: dark;
+        }
         #climate-telemetry-block {
             margin-top: 0.8rem;
         }
@@ -1554,6 +1583,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 grid-template-columns: 1fr;
                 padding: 0.4rem;
             }
+            /* A két hasábra nyúló kártyák mobilon egy hasábosak (különben a rács egy rejtett
+               második hasábot nyitna, és a többi kártya egymás mellé csúszna) */
+            #boiler-card, #shading-devices-card, #sim-panel-card {
+                grid-column: auto !important;
+            }
             .mobile-only-break {
                 display: inline !important;
             }
@@ -1767,6 +1801,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="badge-toggle-auto" class="badge off"><div class="badge-dot"></div>Auto solar</div>
                 <div id="badge-toggle-schedule" class="badge off"><div class="badge-dot"></div>Auto ütemezett</div>
                 <div id="badge-toggle-climate" class="badge off"><div class="badge-dot"></div>Klíma</div>
+                <div id="badge-toggle-shading" class="badge off"><div class="badge-dot"></div>Árnyékolás</div>
             </div>
             <div class="status-divider" id="logout-divider" style="{{LOGOUT_DIVIDER_STYLE}}"></div>
             <div class="status-group" id="logout-group" style="{{LOGOUT_GROUP_STYLE}}">
@@ -1793,6 +1828,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="page-tabs">
             <button type="button" class="page-tab active" id="page-tab-charger" onclick="showPage('charger')">Autótöltő</button>
             <button type="button" class="page-tab" id="page-tab-climate" onclick="showPage('climate')">Klímavezérlés</button>
+            <button type="button" class="page-tab" id="page-tab-boiler" onclick="showPage('boiler')">Bojler</button>
+            <button type="button" class="page-tab" id="page-tab-shading" onclick="showPage('shading')">Árnyékolás</button>
         </div>
     </header>
 
@@ -1812,6 +1849,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="status-dot-item auto-active" id="mobile-status-auto"><div class="dot"></div><span>Solar</span></div>
             <div class="status-dot-item auto-active" id="mobile-status-schedule"><div class="dot"></div><span>Ütemezett</span></div>
             <div class="status-dot-item auto-active" id="mobile-status-climate"><div class="dot"></div><span>Klíma</span></div>
+            <div class="status-dot-item auto-active" id="mobile-status-shading"><div class="dot"></div><span>Árnyék.</span></div>
         </div>
     </div>
 
@@ -1831,6 +1869,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </button>
         <button class="dock-item" id="dock-item-climate" onclick="showSection('climate')" title="Klímavezérlés">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path></svg>
+        </button>
+        <button class="dock-item" id="dock-item-boiler" onclick="showSection('boiler')" title="Bojler">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7c-2.6 3.1-6 6.6-6 10.3a6 6 0 0 0 12 0c0-3.7-3.4-7.2-6-10.3z"></path></svg>
+        </button>
+        <button class="dock-item" id="dock-item-shading" onclick="showSection('shading')" title="Árnyékolás">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="4" rx="1"></rect><line x1="5" y1="11" x2="19" y2="11"></line><line x1="5" y1="15" x2="19" y2="15"></line><line x1="5" y1="19" x2="19" y2="19"></line></svg>
         </button>
         <button class="dock-item" id="dock-item-log" onclick="showSection('log')" title="Napló">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
@@ -2242,6 +2286,67 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- BOJLER — később -->
+        <div class="card" id="boiler-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem; min-height: auto;">
+            <div class="card-title">Bojler</div>
+            <div class="climate-status">Később.</div>
+        </div>
+
+        <!-- ÁRNYÉKOLÁS — redőny és napellenző napi időzítője (RF, BroadLink RM4 Pro) -->
+        <div class="card shading-card" id="shading-roller-card" style="display: none; flex-direction: column; gap: 0.8rem;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                Redőny
+                <label class="checkbox-group"><input type="checkbox" id="sh_roller_enabled"> Időzítő aktív</label>
+            </div>
+            <table class="shading-table">
+                <thead><tr><th></th><th>Fel</th><th>Le</th></tr></thead>
+                <tbody>
+                    <tr><td>Hétfő</td><td><input type="time" id="sh_roller_up_0"></td><td><input type="time" id="sh_roller_down_0"></td></tr>
+                    <tr><td>Kedd</td><td><input type="time" id="sh_roller_up_1"></td><td><input type="time" id="sh_roller_down_1"></td></tr>
+                    <tr><td>Szerda</td><td><input type="time" id="sh_roller_up_2"></td><td><input type="time" id="sh_roller_down_2"></td></tr>
+                    <tr><td>Csütörtök</td><td><input type="time" id="sh_roller_up_3"></td><td><input type="time" id="sh_roller_down_3"></td></tr>
+                    <tr><td>Péntek</td><td><input type="time" id="sh_roller_up_4"></td><td><input type="time" id="sh_roller_down_4"></td></tr>
+                    <tr><td>Szombat</td><td><input type="time" id="sh_roller_up_5"></td><td><input type="time" id="sh_roller_down_5"></td></tr>
+                    <tr><td>Vasárnap</td><td><input type="time" id="sh_roller_up_6"></td><td><input type="time" id="sh_roller_down_6"></td></tr>
+                </tbody>
+            </table>
+            <div class="climate-status">Üres időpont: aznap nincs mozgás.</div>
+            <div>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveShading('roller')">Mentés</button>
+            </div>
+        </div>
+
+        <div class="card shading-card" id="shading-awning-card" style="display: none; flex-direction: column; gap: 0.8rem;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                Napellenző
+                <label class="checkbox-group"><input type="checkbox" id="sh_awning_enabled"> Időzítő aktív</label>
+            </div>
+            <table class="shading-table">
+                <thead><tr><th></th><th>Ki (Le)</th><th>Be (Fel)</th></tr></thead>
+                <tbody>
+                    <tr><td>Hétfő</td><td><input type="time" id="sh_awning_down_0"></td><td><input type="time" id="sh_awning_up_0"></td></tr>
+                    <tr><td>Kedd</td><td><input type="time" id="sh_awning_down_1"></td><td><input type="time" id="sh_awning_up_1"></td></tr>
+                    <tr><td>Szerda</td><td><input type="time" id="sh_awning_down_2"></td><td><input type="time" id="sh_awning_up_2"></td></tr>
+                    <tr><td>Csütörtök</td><td><input type="time" id="sh_awning_down_3"></td><td><input type="time" id="sh_awning_up_3"></td></tr>
+                    <tr><td>Péntek</td><td><input type="time" id="sh_awning_down_4"></td><td><input type="time" id="sh_awning_up_4"></td></tr>
+                    <tr><td>Szombat</td><td><input type="time" id="sh_awning_down_5"></td><td><input type="time" id="sh_awning_up_5"></td></tr>
+                    <tr><td>Vasárnap</td><td><input type="time" id="sh_awning_down_6"></td><td><input type="time" id="sh_awning_up_6"></td></tr>
+                </tbody>
+            </table>
+            <div class="climate-status">Üres időpont: aznap nincs mozgás.</div>
+            <div>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveShading('awning')">Mentés</button>
+            </div>
+        </div>
+
+        <div class="card" id="shading-devices-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem; min-height: auto;">
+            <details class="climate-devices">
+                <summary>Eszközök (RF-tanítás, próba)</summary>
+                <div id="shading-broadlink" class="climate-status" style="margin-bottom:0.6rem;"></div>
+                <div id="shading-units"></div>
+            </details>
         </div>
 
         <!-- SZIMULÁCIÓS ÉS TESZT PANEL -->
@@ -3066,6 +3171,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
 
                 if (data.climate) renderClimate(data.climate);
+                if (data.shading) renderShading(data.shading);
 
                 // Inverter kapcsolat
                 const inverterBadge = document.getElementById('badge-inverter');
@@ -3500,7 +3606,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         let activeTab = 'auto';
         let currentSection = 'auto';
-        let currentPage = 'charger';   // 'charger' (Autótöltő) vagy 'climate' (Fűtés)
+        let currentPage = 'charger';   // 'charger' / 'climate' / 'boiler' / 'shading'
 
         function selectTab(tab) {
             activeTab = tab;
@@ -3516,71 +3622,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('config-force').style.display = activeTab === 'force' ? 'flex' : 'none';
         }
 
+        // Rész -> oldal: a mobil dokk részei és a fejléc fülei ugyanazokat az oldalakat jelenítik meg
+        const PAGE_OF_SECTION = { climate: 'climate', boiler: 'boiler', shading: 'shading' };
+        const PAGES = ['charger', 'climate', 'boiler', 'shading'];
+
         function showSection(section) {
             currentSection = section;
-            // A kiválasztott rész meghatározza az oldalt is (a Napló mindkettőhöz tartozik)
-            if (section === 'climate') currentPage = 'climate';
+            // A kiválasztott rész meghatározza az oldalt is (a Napló minden oldalhoz tartozik)
+            if (PAGE_OF_SECTION[section]) currentPage = PAGE_OF_SECTION[section];
             else if (section !== 'log') currentPage = 'charger';
-            const tabCharger = document.getElementById('page-tab-charger');
-            const tabClimate = document.getElementById('page-tab-climate');
-            if (tabCharger) tabCharger.classList.toggle('active', currentPage === 'charger');
-            if (tabClimate) tabClimate.classList.toggle('active', currentPage === 'climate');
+            PAGES.forEach(p => {
+                const t = document.getElementById('page-tab-' + p);
+                if (t) t.classList.toggle('active', currentPage === p);
+            });
 
             // Ikondokk kijelölés frissítése
             document.querySelectorAll('.dock-item').forEach(el => el.classList.remove('active'));
             const activeDockItem = document.getElementById('dock-item-' + section);
             if (activeDockItem) activeDockItem.classList.add('active');
-            
+
             const isMobile = window.innerWidth <= 1024;
-            
-            // Kártyák kiválasztása DOM-ból
+
             const configCard = document.getElementById('config-card');
             const telemetryCard = document.getElementById('telemetry-card');
             const simCard = document.getElementById('sim-panel-card');
             const logCard = document.querySelector('.console-container');
             const climateCard = document.getElementById('climate-card');
+            const boilerCard = document.getElementById('boiler-card');
+            const shadingCards = ['shading-roller-card', 'shading-awning-card', 'shading-devices-card']
+                .map(id => document.getElementById(id));
+            const show = (el, disp) => { if (el) el.style.display = disp; };
+
+            // Mindent elrejtünk, majd az adott nézet kártyáit megjelenítjük
+            [configCard, telemetryCard, simCard, logCard, climateCard, boilerCard, ...shadingCards].forEach(el => show(el, 'none'));
 
             if (isMobile) {
-                // Mobilon mindent elrejtünk, majd csak a kiválasztottat mutatjuk meg
-                if (configCard) configCard.style.display = 'none';
-                if (telemetryCard) telemetryCard.style.display = 'none';
-                if (simCard) simCard.style.display = 'none';
-                if (logCard) logCard.style.display = 'none';
-                if (climateCard) climateCard.style.display = 'none';
-
                 if (section === 'auto' || section === 'schedule' || section === 'force') {
-                    if (configCard) configCard.style.display = 'flex';
+                    show(configCard, 'flex');
                     selectTab(section);
                 } else if (section === 'measurements') {
-                    if (telemetryCard) telemetryCard.style.display = 'flex';
+                    show(telemetryCard, 'flex');
                 } else if (section === 'climate') {
-                    // Fűtés fül mobilon: a Mérések ablak (az autótöltő része nélkül) + a Fűtés kártya
-                    if (telemetryCard) telemetryCard.style.display = 'flex';
-                    if (climateCard) climateCard.style.display = 'flex';
+                    // Klímavezérlés mobilon: a Mérések ablak (az autótöltő része nélkül) + a Klímavezérlés kártya
+                    show(telemetryCard, 'flex');
+                    show(climateCard, 'flex');
+                } else if (section === 'boiler') {
+                    show(boilerCard, 'flex');
+                } else if (section === 'shading') {
+                    shadingCards.forEach(el => show(el, 'flex'));
                 } else if (section === 'log') {
-                    if (logCard) logCard.style.display = 'block';
+                    show(logCard, 'block');
                 }
-            } else if (currentPage === 'climate') {
-                // Asztali nézet, Fűtés fül: Mérések (az autótöltő része nélkül), alatta a Fűtés kártya, és a Napló
-                if (configCard) configCard.style.display = 'none';
-                if (simCard) simCard.style.display = 'none';
-                if (telemetryCard) telemetryCard.style.display = 'flex';
-                if (climateCard) climateCard.style.display = 'flex';
-                if (logCard) logCard.style.display = 'block';
             } else {
-                // Asztali nézet, Autótöltő fül: a megszokott elrendezés, a Fűtés kártya nélkül
-                if (configCard) configCard.style.display = 'flex';
-                if (telemetryCard) telemetryCard.style.display = 'flex';
-                if (climateCard) climateCard.style.display = 'none';
-
-                if (simCard) {
+                show(logCard, 'block');
+                if (currentPage === 'climate') {
+                    // Asztali, Klímavezérlés: bal a Klímavezérlés kártya, jobb a Mérések (autótöltős rész nélkül)
+                    show(climateCard, 'flex');
+                    show(telemetryCard, 'flex');
+                } else if (currentPage === 'boiler') {
+                    show(boilerCard, 'flex');
+                } else if (currentPage === 'shading') {
+                    // Asztali, Árnyékolás: bal a Redőny, jobb a Napellenző, alattuk az eszközök
+                    shadingCards.forEach(el => show(el, 'flex'));
+                } else {
+                    // Asztali, Autótöltő: a megszokott elrendezés
+                    show(configCard, 'flex');
+                    show(telemetryCard, 'flex');
                     const simToggle = document.getElementById('sim_mode_toggle');
-                    simCard.style.display = (simToggle && simToggle.checked) ? 'flex' : 'none';
-                }
-                if (logCard) logCard.style.display = 'block';
-
-                if (section === 'auto' || section === 'schedule' || section === 'force') {
-                    selectTab(section);
+                    show(simCard, (simToggle && simToggle.checked) ? 'flex' : 'none');
+                    if (section === 'auto' || section === 'schedule' || section === 'force') {
+                        selectTab(section);
+                    }
                 }
             }
 
@@ -3595,18 +3707,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (telemetryCard) {
                 // Az autótöltős rész nélkül a kártya alapmagassága (580 px) üres sávot hagyna
                 telemetryCard.style.minHeight = climateView ? 'auto' : '';
-                // Mobilon a Fűtés nézetben a Mérések marad felül (a HTML-ben a Fűtés kártya van előrébb,
-                // hogy asztali nézetben a bal hasábba essen)
+                // Mobilon a Klímavezérlés nézetben a Mérések marad felül (a HTML-ben a Klímavezérlés kártya
+                // van előrébb, hogy asztali nézetben a bal hasábba essen)
                 telemetryCard.style.order = (isMobile && climateView) ? '-1' : '';
             }
         }
 
-        // Fejléc fülei (asztali nézet): Autótöltő / Fűtés
+        // Fejléc fülei (asztali nézet): Autótöltő / Klímavezérlés / Bojler / Árnyékolás
         function showPage(page) {
-            if (page === 'climate') {
-                showSection('climate');
+            if (page !== 'charger') {
+                showSection(page);
             } else {
-                showSection((currentSection === 'climate' || currentSection === 'log') ? 'measurements' : currentSection);
+                showSection((PAGE_OF_SECTION[currentSection] || currentSection === 'log') ? 'measurements' : currentSection);
             }
         }
 
@@ -3779,6 +3891,124 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error(err);
             }
         }
+
+        // === ÁRNYÉKOLÁS (redőny, napellenző) ===
+        const SHADING_DEVICES = ['roller', 'awning'];
+        const SHADING_LABELS = { roller: 'Redőny', awning: 'Napellenző' };
+        const SHADING_ACTIONS = { roller: { up: 'Fel', down: 'Le' }, awning: { up: 'Be (Fel)', down: 'Ki (Le)' } };
+        let shadingFormLoaded = false;
+
+        function buildShadingUnits() {
+            const box = document.getElementById('shading-units');
+            if (!box || box.childElementCount) return;
+            SHADING_DEVICES.forEach(dev => {
+                const a = SHADING_ACTIONS[dev];
+                const div = document.createElement('div');
+                div.className = 'climate-block';
+                div.innerHTML = `
+                    <div class="climate-block-title">${SHADING_LABELS[dev]}</div>
+                    <div id="shading_result_${dev}" class="climate-status"></div>
+                    <div class="climate-btns">
+                        <button type="button" class="action-btn action-btn-soft" onclick="shadingLearn('${dev}', 'up')">Tanítás ${a.up}</button>
+                        <button type="button" class="action-btn action-btn-soft" onclick="shadingLearn('${dev}', 'down')">Tanítás ${a.down}</button>
+                        <button type="button" class="action-btn action-btn-start" onclick="shadingSend('${dev}', 'up')">Próba ${a.up}</button>
+                        <button type="button" class="action-btn action-btn-start" onclick="shadingSend('${dev}', 'down')">Próba ${a.down}</button>
+                    </div>`;
+                box.appendChild(div);
+            });
+        }
+
+        function renderShading(sh) {
+            buildShadingUnits();
+            const devices = sh.devices || {};
+            const anyActive = SHADING_DEVICES.some(d => devices[d] && devices[d].enabled);
+            setHeaderBadge('badge-toggle-shading', anyActive ? 'active' : 'off');
+            setMobileDot('mobile-status-shading', anyActive ? 'active' : 'off', true);
+
+            const bl = document.getElementById('shading-broadlink');
+            if (bl) bl.textContent = sh.broadlink_ip ? `BroadLink (RM4 Pro): ${sh.broadlink_ip}`
+                                                     : 'BroadLink IP-címe nincs megadva (config.json: shading.broadlink_ip).';
+            const mark = ok => ok ? '✓' : '–';
+            SHADING_DEVICES.forEach(dev => {
+                const d = devices[dev] || {};
+                const a = SHADING_ACTIONS[dev];
+                const res = document.getElementById('shading_result_' + dev);
+                if (res) {
+                    let html = `${a.up}: ${mark(d.has_up)} &nbsp;|&nbsp; ${a.down}: ${mark(d.has_down)}`;
+                    if (d.busy && d.busy.startsWith('learn_')) {
+                        const step = d.stage === 'hold' ? '1. lépés: TARTSD NYOMVA a távirányító gombját a BroadLink felé fordítva, amíg a következő lépés meg nem jelenik…'
+                                   : d.stage === 'press' ? '2. lépés: engedd el, majd EGYSZER nyomd meg a gombot…'
+                                   : 'Tanítás indul…';
+                        html += `<br><b>${step}</b>`;
+                    } else if (d.busy) {
+                        html += '<br><b>Küldés…</b>';
+                    } else if (d.last_result) {
+                        const when = d.last_result_time ? new Date(d.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
+                        html += `<br><span style="color:${d.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(d.last_result)}</span> (${when})`;
+                    }
+                    res.innerHTML = html;
+                }
+            });
+
+            // Az időzítő-űrlapot csak egyszer töltjük ki (és mentés után), hogy a frissítés ne írja felül a gépelést
+            if (!shadingFormLoaded) {
+                SHADING_DEVICES.forEach(dev => {
+                    const d = devices[dev] || {};
+                    const en = document.getElementById(`sh_${dev}_enabled`);
+                    if (en) en.checked = !!d.enabled;
+                    (d.schedule || []).forEach((day, i) => {
+                        const up = document.getElementById(`sh_${dev}_up_${i}`);
+                        const down = document.getElementById(`sh_${dev}_down_${i}`);
+                        if (up) up.value = day.up || '';
+                        if (down) down.value = day.down || '';
+                    });
+                });
+                shadingFormLoaded = true;
+            }
+        }
+
+        async function saveShading(dev) {
+            const schedule = [];
+            for (let i = 0; i < 7; i++) {
+                schedule.push({
+                    up: document.getElementById(`sh_${dev}_up_${i}`).value,
+                    down: document.getElementById(`sh_${dev}_down_${i}`).value
+                });
+            }
+            const body = { device: dev, enabled: document.getElementById(`sh_${dev}_enabled`).checked, schedule: schedule };
+            try {
+                const response = await fetch('/api/shading/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const res = await response.json();
+                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
+                if (res.status === 'success') {
+                    shadingFormLoaded = false;
+                    updateStatus();
+                }
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        async function shadingAction(url, dev, action) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device: dev, action: action })
+                });
+                const res = await response.json();
+                if (res.status !== 'success' || url.endsWith('/learn')) alert(res.message);
+                updateStatus();
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+        function shadingLearn(dev, action) { shadingAction('/api/shading/learn', dev, action); }
+        function shadingSend(dev, action) { shadingAction('/api/shading/send', dev, action); }
 
         // === KLÍMAVEZÉRLÉS ===
         const CLIMATE_UNIT_COUNT = 3;
@@ -4301,6 +4531,20 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_encrypted_json({"status": "error", "message": f"Hibás adatformátum: {e}"})
                 
+        elif self.path in ('/api/shading/config', '/api/shading/learn', '/api/shading/send'):
+            # Árnyékolás: időzítő mentése (config.json), RF-tanítás, kézi próba
+            try:
+                data = self._read_encrypted_body()
+                if self.path == '/api/shading/config':
+                    ok, msg = shading_logic.update_shading_config(data)
+                elif self.path == '/api/shading/learn':
+                    ok, msg = shading_logic.start_learn(data.get("device"), data.get("action"))
+                else:
+                    ok, msg = shading_logic.send_code(data.get("device"), data.get("action"))
+                self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
+            except Exception as e:
+                self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
+
         elif self.path in ('/api/climate/learn', '/api/climate/send'):
             # Klímavezérlés: IR-tanítás és kézi próba-küldés. Az eszközök címe, a légtisztító
             # tokenje és a klímák neve csak a config.json-ban állítható (mint az inverter IP-je).
