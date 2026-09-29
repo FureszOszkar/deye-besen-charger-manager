@@ -1801,6 +1801,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="badge-toggle-auto" class="badge off"><div class="badge-dot"></div>Auto solar</div>
                 <div id="badge-toggle-schedule" class="badge off"><div class="badge-dot"></div>Auto ütemezett</div>
                 <div id="badge-toggle-climate" class="badge off"><div class="badge-dot"></div>Klíma</div>
+                <div id="badge-toggle-boiler" class="badge off" title="Később"><div class="badge-dot"></div>Bojler</div>
                 <div id="badge-toggle-shading" class="badge off"><div class="badge-dot"></div>Árnyékolás</div>
             </div>
             <div class="status-divider" id="logout-divider" style="{{LOGOUT_DIVIDER_STYLE}}"></div>
@@ -1849,6 +1850,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="status-dot-item auto-active" id="mobile-status-auto"><div class="dot"></div><span>Solar</span></div>
             <div class="status-dot-item auto-active" id="mobile-status-schedule"><div class="dot"></div><span>Ütemezett</span></div>
             <div class="status-dot-item auto-active" id="mobile-status-climate"><div class="dot"></div><span>Klíma</span></div>
+            <div class="status-dot-item auto-active" id="mobile-status-boiler"><div class="dot"></div><span>Bojler</span></div>
             <div class="status-dot-item auto-active" id="mobile-status-shading"><div class="dot"></div><span>Árnyék.</span></div>
         </div>
     </div>
