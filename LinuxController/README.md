@@ -1,8 +1,8 @@
 # Linux (Debian 13) Telepítési Útmutató
 
-Ez a mappa **önmagában, teljesen önállóan** tartalmazza a Deye & BESEN Töltővezérlő futtatásához szükséges mindent: a program forráskódját (`main.py` és a többi `.py` fájl), a kiegészítő fájlokat (`crypto-js.min.js`, `background.jpg`) és a Linux-telepítéshez szükséges eszközöket. **Az egész `LinuxController` mappa átmásolható a Linux gépre — bármilyen néven, bármilyen könyvtárba —, és onnan minden útvonal-szerkesztés nélkül működik.**
+Ez a mappa **önmagában, teljesen önállóan** tartalmazza az Otthonvezérlő futtatásához szükséges mindent: a program forráskódját (`main.py` és a többi `.py` fájl), a kiegészítő fájlokat (`crypto-js.min.js`, `background.jpg`) és a Linux-telepítéshez szükséges eszközöket. **Az egész `LinuxController` mappa átmásolható a Linux gépre — bármilyen néven, bármilyen könyvtárba —, és onnan minden útvonal-szerkesztés nélkül működik.**
 
-A program platformfüggetlen — nincs benne Windows-specifikus hívás, a webszerver a Python szabványos könyvtárát használja —, a három harmadik féltől származó függőség (`bleak`, `pysolarmanv5`, `pycryptodome`) mindegyike támogatott Linuxon.
+A program platformfüggetlen — nincs benne Windows-specifikus hívás, a webszerver a Python szabványos könyvtárát használja —, a négy harmadik féltől származó függőség (`bleak`, `pysolarmanv5`, `pycryptodome`, `broadlink`) mindegyike támogatott Linuxon. A fájl- és szolgáltatásnevek (`deye-besen-controller.service`, `deye-besen-controller`) az átnevezés után is változatlanok.
 
 ## Gyors telepítés
 
@@ -69,6 +69,16 @@ A `config.json` **nem jön létre automatikusan indításkor**. A program hiány
 **Ezért a `config.json` biztosítása nem opcionális, hanem szükséges** a valós hardverhez. Két lehetőség:
 1.  **Másold a mellékelt [`config_example.json`](config_example.json) fájlt ebbe a mappába** (a `LinuxController` mappa gyökerébe, a `main.py` mellé) `config.json` néven, és írd bele a saját inverter IP-det, sorozatszámodat, a töltő nevét/MAC-címét és jelszavát.
 2.  **Vagy másold át a meglévő (pl. Windows-oldali) `config.json`-odat** ugyanebbe a mappába, ha már van egy működő beállításod.
+
+## Klímavezérlés és árnyékolás (BroadLink, Xiaomi légtisztító)
+
+*   **Frissítéskor** (ha a program egy régebbi, klímavezérlés nélküli változatáról frissítesz) a meglévő virtuális környezetbe telepíteni kell az új `broadlink` csomagot is, a mappán belülről:
+    ```bash
+    .venv/bin/pip install -r requirements.txt
+    ```
+    Utána indítsd újra a szolgáltatást (`systemctl restart deye-besen-controller`).
+*   A klímák BroadLink adóinak, a légtisztítónak és az árnyékolást vezérlő RM4 Pro-nak az **IP-címét**, valamint a **légtisztító kulcsát (token)** a `config.json`-ba kell írni (`"climate"` és `"shading"` blokk) — a webes felületen ezek nem adhatók meg. Minta: [`config_example.json`](config_example.json); a részleteket lásd a projekt fő README-jének 11. és 12. fejezetében.
+*   A NAS-nak és az eszközöknek **ugyanazon a helyi hálózaton** kell lenniük (vendéghálózatról az eszközök nem érhetők el).
 
 ## Automatikus indítás systemd szolgáltatásként
 

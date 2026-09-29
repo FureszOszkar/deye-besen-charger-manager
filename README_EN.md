@@ -3,6 +3,8 @@
 
 This software is a local, offline-running integrated controller solution that connects a **Deye three-phase hybrid inverter** and a **BESEN BS20 smart car charger (EVSE)**. The software aims to automatically, intelligently, and safely control electric vehicle charging based on solar energy generation and the home storage battery status.
 
+Besides car charging, the program also handles further devices of the house, each on its own tab: **air conditioners** (via BroadLink infrared transmitters, with the thermometer of a Xiaomi air purifier — see Section 11) and **shading** (a roller shutter and an awning via radio control, with a weekly timer — see Section 12). **Boiler** control comes later (Section 13).
+
 ---
 
 ## 1. Hardware Models and Specifications
@@ -14,6 +16,11 @@ This software has been developed and tested in the following hardware environmen
 *   **Car Charger (EVSE):** **BESEN BS20-APP-3P16A** (3-phase, max 16A / 11 kW smart car charger)
     *   **Communication Interface:** Bluetooth Low Energy (BLE) connection.
 *   **Home Storage Battery:** Low-voltage (48V) Lithium Iron Phosphate (LiFePO4 / LFP) battery pack (e.g., 20-30 kWh capacity) connected to the inverter.
+*   **Air conditioner control:** 3 old, non-smart air conditioners, each with a BroadLink transmitter in front of it: 1 × **BroadLink RM4 Pro** (infrared + radio) and 2 × **BroadLink RM4C Mini** (infrared only).
+    *   **Communication Interface:** local Wi-Fi (with the `broadlink` Python library), no cloud.
+*   **Thermometer:** **Xiaomi Smart Air Purifier 4** (model: `zhimi.airp.mb5`) — temperature and humidity.
+    *   **Communication Interface:** local Wi-Fi, using the manufacturer's miIO protocol (UDP port `54321`) with the device key (token).
+*   **Shading:** a radio (RF) remote-controlled roller shutter and awning, controlled with the radio transmitter of the **BroadLink RM4 Pro** above.
 
 ---
 
@@ -65,9 +72,9 @@ The software is written in Python and can be run on Windows either as Python sou
 Install Python 3.14 (the Windows exe is built with it; the previously used 3.9 is end-of-life), preferably into a virtual environment, then install the required dependencies:
 ```bash
 py -3.14 -m venv .venv314
-.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome pyinstaller
+.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome broadlink pyinstaller
 ```
-Last verified versions: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `pyinstaller 6.22.3`.
+Last verified versions: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `broadlink 0.19.0`, `pyinstaller 6.22.3`.
 
 ### B) Running in Simulation Mode
 To test the web interface and rules without any real hardware:
@@ -118,7 +125,7 @@ On the **"Mérések & Visszacsatolás" (Measurements & Feedback)** card on the r
 *   **Total Charging Energy:** The BESEN charger's raw telemetry registers only track energy accumulation for the primary phase (L1). In 3-phase charging mode (detected when current flows on L2 or L3), the controller automatically applies a 3.0x multiplier to the telemetry value so that the actual total energy delivered to the battery (kWh) is displayed on the dashboard.
 
 ### C) Mobile Navigation (Icon Dock)
-In mobile view (narrow screen), instead of the traditional tab selector, a semi-transparent, right-side icon dock appears, positioned in the lower third of the screen for comfortable one-handed thumb reach. The meaning of the 5 icons, top to bottom:
+In mobile view (narrow screen), instead of the traditional tab selector, a semi-transparent, right-side icon dock appears, positioned in the lower third of the screen for comfortable one-handed thumb reach. The meaning of the 8 icons, top to bottom:
 
 | Icon | Meaning |
 |---|---|
@@ -126,9 +133,21 @@ In mobile view (narrow screen), instead of the traditional tab selector, a semi-
 | 🕐 (clock) | Scheduled mode |
 | ✋ (hand) | Force (manual) mode |
 | 📈 (activity) | Measurements |
+| 🌡️ (thermometer) | Air conditioner control (Klímavezérlés) |
+| 💧 (drop) | Boiler |
+| ☰ (horizontal bars) | Shading (Árnyékolás) |
 | 📄 (document) | Log |
 
 The Logout button on mobile is available as a small dedicated icon in the header (only visible when web authentication is enabled). The button is visible even when the page loads broken or empty.
+
+### D) Header: Status Badges and Tabs
+Next to the title ("Otthonvezérlő", subtitle: "Helyi autótöltés és klíma vezérlő." — local EV charging and air conditioner controller) the header shows two badge groups:
+*   **Connections (Kapcsolatok):** Inverter, Töltő (charger), Hőmérő (thermometer), Klíma1, Klíma2, Klíma3. **Green** = the connection is alive, **red** = not reachable, **grey** = not configured (the device IP address is not set in `config.json`). The air conditioner badges show the reachability of their BroadLink transmitter.
+*   **Automations (Automatizmusok):** Auto solar, Auto ütemezett (scheduled), Klíma, Bojler, Árnyékolás (shading). A badge **lights up (cyan)** when that automation is enabled, and is grey when it is not. The Klíma badge lights up when "Automata bekapcsolva" (automation enabled) is saved in the air conditioner control; the Árnyékolás badge when at least one timer is active. The Bojler badge is always grey for now (comes later).
+
+Below them are the **tabs**: Autótöltő (car charger), Klímavezérlés (air conditioner control), Bojler (boiler), Árnyékolás (shading). Each tab is a completely separate page; in desktop view the Log appears at the bottom of every page (on mobile it has its own icon). On the Klímavezérlés tab the Measurements card is shown without the car charger part, with the "Hőmérő és klímák" (thermometer and air conditioners) rows.
+
+On mobile, instead of the badges, two short status rows are shown ("Kapcs.:" and "Auto.:" rows with coloured dots, same meaning), and the icon dock replaces the tabs.
 
 ---
 
@@ -190,6 +209,7 @@ The software features multiple safety mechanisms to protect the hardware, the el
     *   **A single inverter connection:** the program keeps at most one connection open to the Wi-Fi logger (which accepts only very few parallel connections). After an outage the old connection is closed and a new one is built — orphaned connections do not pile up and do not take over the logger's free slots.
     *   **Less frequent polling while charging:** by default the program polls the logger every 10 seconds, but every 20 seconds while the car is actively charging, because the logger often fails to respond when the inverter is under peak load. The trade-off is that during Solar Auto charging the stops for house overload, low SoC and grid import can react up to about 10 seconds later (the charger's own load management protects regardless).
     *   **Patient waiting for the logger:** the program waits up to 15 seconds for each response, because under load the logger often answers in 10-15 seconds. The Watchdog does not treat a slow but progressing poll as frozen (a heartbeat is sent after every step of the poll), but still notices a genuinely stuck one.
+    *   **A single late response does not drop the connection:** if the logger once fails to answer in time, the connection is kept (the poll fails, the Inverter indicator is red for that one round), and the next poll uses the same connection. Only after **two consecutive** timeouts is the connection closed and rebuilt. For other errors (e.g. a connection error) the connection is still rebuilt immediately. A late-arriving old response is recognised and discarded.
     *   **One request per poll:** the program reads all needed inverter data with a single request instead of the previous 6, so the logger gets a sixth of the requests and a poll waits for a response only once. If the logger did not accept it, the program automatically switches back to the 6 separate requests (an `[INVERTER]` log line shows the mode).
     *   All Bluetooth write and notification requests are constrained by a strict 5-second timeout limit, and closing the connection has a 12-second timeout (a hung disconnect is logged and does not block the program).
     *   **Connection Timeout Protection:** `BleakClient` connection attempts (`client.connect()`) can occasionally hang indefinitely within the Windows Bluetooth stack. To mitigate this, connection attempts are wrapped in an explicit 20-second async timeout (`asyncio.wait_for`). If connection takes longer, it is aborted, the socket is cleaned up, and a fresh reconnection cycle is started.
@@ -217,6 +237,7 @@ The dashboard provides the following settings:
 *   **Max Grid Import (W)** - Grid tolerance threshold. If exceeded, charging stops.
 *   **Grid Import Time Limit (Minutes)** - How long the system tolerates the above grid import excess before stopping charging (e.g., 5 minutes, to ride out passing clouds).
 *   **Remember Mode on Restart** - A toggle that makes the controller remember the last-used mode (Auto/Schedule/Force).
+*   **Air conditioner control and Shading:** the air conditioner settings (Section 11), the shading timers (Section 12) and the infrared/radio codes learned on the dashboard are also saved to `config.json` (`"climate"` and `"shading"` blocks), so they are reloaded after a power outage or restart. The device **IP addresses and the air purifier key (token), however, can only be set in `config.json`**, not on the dashboard — see `config_example.json` for the template.
 *   *Hidden advanced setting (only changeable in `config.json`)*: `"pbkdf2_iterations"` - The strength of the password encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins. This value is safe to change: the web dashboard and the widget in the `AndroidWidget` folder both fetch the current setting dynamically from the server at login time, so no client-side value needs to match it.
 
 ---
@@ -267,6 +288,85 @@ Over the same encrypted connection the server uses, the widget displays values t
 ### Security note
 
 The widget stores the dashboard password locally, in the phone's private storage (`SharedPreferences`). The app disables Android backup (`android:allowBackup="false"`) so the password cannot be extracted via `adb backup`. Communication between the widget and the server is end-to-end encrypted (AES-256 + HMAC), the same way as the web interface.
+
+---
+
+## 11. Air Conditioner Control (Klímavezérlés)
+
+On the **Klímavezérlés** tab 3 old, non-smart air conditioners can be controlled with their remote's infrared signal, through BroadLink transmitters. A Xiaomi air purifier serves as the thermometer (temperature; humidity is display only). The goal: during solar **export** the air conditioners should heat (in winter) or cool (in summer) from the surplus energy.
+
+**Current state:** device connection, code learning, manual test and saving the settings work. **The automation does not switch anything yet** — it comes in the next development step (see "Planned behaviour" below).
+
+### Prerequisites (one-time setup)
+1.  **BroadLink transmitters:** add them to the Wi-Fi network in the BroadLink app, then in the device settings **turn off the "Lock device" option** (otherwise the program cannot talk to them). Give them a **fixed IP address** in the router.
+2.  **Air purifier:** its **key (token)** is needed; it can be read from the Xiaomi account e.g. with the "Xiaomi Cloud Tokens Extractor" program. If you re-pair the purifier later, the key changes. Give it a **fixed IP address** too.
+3.  **Network:** the machine running the controller and all devices must be on **the same local network** — devices on a guest network are not reachable.
+4.  **`config.json`:** enter the IP addresses and the key (they cannot be set on the dashboard). Example (the numbers are only samples):
+    ```json
+    "climate": {
+        "sensor": {"ip": "192.168.0.50", "token": "<32-character key>"},
+        "units": [
+            {"name": "Nappali", "broadlink_ip": "192.168.0.51"},
+            {"name": "Háló", "broadlink_ip": "192.168.0.52"},
+            {"name": "Dolgozó", "broadlink_ip": "192.168.0.53"}
+        ]
+    }
+    ```
+    `name` is the room name (shown next to the "Klíma1–3" label on the dashboard). The other fields (codes, settings) are filled in by the program from the dashboard.
+
+### Measurements: "Hőmérő és klímák" (thermometer and air conditioners)
+On the Measurements card of the Klímavezérlés tab (without the car charger part) you see the air purifier status (temperature, humidity, last update) and, per air conditioner, which codes have already been learned (Fűtés BE / Hűtés BE / KI — heating ON / cooling ON / OFF). The program reads the air purifier and checks the reachability of the BroadLink transmitters **every minute**; the result is shown on the Hőmérő and Klíma1–3 header badges, and changes are also recorded in the Log.
+
+### Code learning and manual test
+The collapsible **"Eszközök (tanítás, próba)"** (devices: learning, test) section at the bottom of the Klímavezérlés card contains the buttons per air conditioner. Each air conditioner needs three codes: **heating ON**, **cooling ON** and **OFF** (the air conditioners use separate ON and OFF codes, not a toggle).
+1.  Set the desired state on the remote (e.g. heating, with the desired temperature).
+2.  Press the matching **"Tanítás …"** (learn) button, then within 30 seconds press the remote's button pointed at the BroadLink transmitter.
+3.  On success the code is saved to `config.json` and the ✓ mark appears. You can try it with the **"Próba …"** (test) button.
+
+### Settings
+The automation settings are at the top of the Klímavezérlés card. The **"Beállítások mentése"** (save settings) button only saves when every field is filled in and valid — with an invalid or empty field nothing changes, and the program tells which field is wrong.
+*   **Fűtés / Hűtés (heating / cooling):** the operating mode; it decides which ON code is sent.
+*   **Automata bekapcsolva (automation enabled):** turns the automation on or off (the header Klíma badge shows it).
+*   **Akkuszint (%)** (battery level), **Célhőmérséklet (°C)** (target temperature, with one decimal, e.g. `22.1`), **Bekapcsolási idő (perc)** (switch-on time, minutes), **Kikapcsolási idő (perc)** (switch-off time, minutes).
+*   **Per air conditioner (Klímánként):**
+    *   **Visszatermelés a bekapcsoláshoz (W)** (export level to switch on): the export **level** at which this air conditioner should also run. Example: `1500`, `2000`, `2500` W = at this much export I want to use 1, 2 or 3 air conditioners. **These numbers give the switch-on order:** the air conditioner with the lowest threshold starts first (with equal thresholds the lower number first), and switching off goes in reverse order.
+    *   **Várható fogyasztás (W)** (expected consumption): how much that air conditioner consumes while running (see below why it is needed).
+*   **Explanation line:** under each air conditioner's row the program shows how it calculates in practice, updated while typing, e.g. *"Bekapcsol, ha a visszatermelés + 1. klíma várható fogyasztása (600 W) eléri a 2000 W-ot."* (switches on when the export + the expected consumption of air conditioner 1 (600 W) reaches 2000 W). If you rewrite the thresholds, the texts follow the order given by the thresholds.
+
+### Planned behaviour (the next development step, not working yet)
+*   **Calculated production:** the measured export plus the expected consumption of the air conditioners already running. On the grid meter the export is a negative value (e.g. `−1500 W`), so the program takes the export as the negative of the meter reading: positive when exporting, negative when importing from the grid. This way a running air conditioner does not switch off because of its own consumption, since its consumption is added back in the calculation.
+*   **Switch-on:** the next air conditioner in the order switches on if the battery level is sufficient, the calculated production reaches its threshold for the "Bekapcsolási idő" minutes, and the temperature is suitable: **for heating the measured temperature ≤ target, for cooling ≥ target** (with one decimal, the same target for every air conditioner). The temperature only matters at switch-on; after that the air conditioners' own thermostats regulate.
+*   **Switch-off:** the most recently switched-on air conditioner stops if the calculated production stays below its threshold for the "Kikapcsolási idő" minutes; then the next one likewise.
+*   **Example** (thresholds 1500 / 2000 W, expected consumption 600 / 700 W):
+    *   No air conditioner running, meter `−1500 W` → calculated production 1500 → air conditioner 1 switches on.
+    *   Air conditioner 1 running, meter `−1400 W` → 1400 + 600 = 2000 → air conditioner 2 switches on too (if the temperature is still suitable).
+    *   Cloud: meter `+200 W` (import) → −200 + 600 + 700 = 1100 < 2000 → air conditioner 2 stops; then the meter shows about `−500 W` → 500 + 600 = 1100 < 1500 → air conditioner 1 stops too (both after the waiting time).
+
+---
+
+## 12. Shading (Árnyékolás)
+
+On the **Árnyékolás** tab a radio remote-controlled **roller shutter** (redőny) and **awning** (napellenző) can be controlled with the radio transmitter of the BroadLink RM4 Pro, with a daily timer.
+
+### Setup
+*   In `config.json` set the RM4 Pro IP address: `"shading": {"broadlink_ip": "192.168.0.51", ...}` (the number is only a sample; it can be the same RM4 Pro that also controls an air conditioner). The other fields are filled in by the program from the dashboard.
+*   **Learning the radio codes** at the bottom of the page, in the collapsible **"Eszközök (RF-tanítás, próba)"** (devices: RF learning, test) section, in two steps:
+    1.  **Hold down** the remote's button pointed at the BroadLink until the dashboard shows step 2 (the BroadLink is finding the remote's frequency meanwhile).
+    2.  Release it, then press the button **once**.
+
+    Each device needs two codes: for the roller shutter **Fel** (up) and **Le** (down), for the awning **Be (Fel)** (out/up) and **Ki (Le)** (in/down). They can be tried with the **"Próba …"** (test) buttons.
+
+### Timer
+*   On the **Redőny** (roller shutter) and **Napellenző** (awning) cards an **up** and a **down** time can be set separately for every day of the week. An **empty field** means no movement on that day.
+*   With the **"Időzítő aktív"** (timer active) switch the timers of the two devices can be turned off independently.
+*   The program sends the signal **once** in the given minute. If the program is not running in that minute (e.g. power outage), that movement is skipped and not made up later.
+*   The setting is saved to `config.json` and reloaded after a restart or power outage. The header Árnyékolás badge lights up when at least one timer is active.
+
+---
+
+## 13. Boiler (Bojler)
+
+The **Bojler** tab and the header Bojler badge are currently only placeholders: its control will be built later. Until then the badge is grey, and the page shows only a card saying "Később." (later) and (in desktop view) the Log.
 
 ---
 

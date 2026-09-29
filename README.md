@@ -3,6 +3,8 @@
 
 Ez a szoftver egy helyi, offline futó integrált vezérlő megoldás, amely összeköt egy **Deye háromfázisú hibrid invertert** és egy **BESEN BS20 okos autótöltőt (EVSE)**. A szoftver célja, hogy automatikusan, intelligensen és biztonságosan vezérelje az elektromos járművek töltését a napelemes energiatermelés és az otthoni akkumulátor állapota alapján.
 
+Az autótöltés mellett a program a ház további eszközeit is kezeli, mindegyiket külön fülön: **klímák** (BroadLink infravörös adókkal, egy Xiaomi légtisztító hőmérőjével — lásd 11. fejezet), **árnyékolás** (redőny és napellenző rádiós vezérléssel, heti időzítővel — lásd 12. fejezet). A **bojler** vezérlése később jön (13. fejezet).
+
 ---
 
 ## 1. Hardver modellek és specifikációk
@@ -14,6 +16,11 @@ Ezt a szoftvert a következő hardverkörnyezetben fejlesztették és tesztelté
 *   **Autótöltő (EVSE):** **BESEN BS20-APP-3P16A** (3 fázisú, max 16A / 11 kW okos autótöltő)
     *   **Kommunikációs interfész:** Bluetooth Low Energy (BLE) kapcsolat.
 *   **Otthoni Akkumulátor:** Kisfeszültségű (48V) Lítium-Vas-Foszfát (LiFePO4 / LFP) akkupakk (pl. 20-30 kWh kapacitás) az inverterhez csatlakoztatva.
+*   **Klímák vezérlése:** 3 régi, nem okos klíma, mindegyik elé egy BroadLink adó: 1 × **BroadLink RM4 Pro** (infravörös + rádiós) és 2 × **BroadLink RM4C Mini** (csak infravörös).
+    *   **Kommunikációs interfész:** helyi Wi-Fi (a `broadlink` Python-könyvtárral), felhő nélkül.
+*   **Hőmérő:** **Xiaomi Smart Air Purifier 4** légtisztító (modell: `zhimi.airp.mb5`) — hőmérséklet és páratartalom.
+    *   **Kommunikációs interfész:** helyi Wi-Fi, a gyártó miIO protokollján (UDP `54321`-es port), az eszköz kulcsával (token).
+*   **Árnyékolás:** rádiós (RF) távirányítós redőny és napellenző, a fenti **BroadLink RM4 Pro** rádiós adójával vezérelve.
 
 ---
 
@@ -65,9 +72,9 @@ A szoftver Python-ban íródott, és Python forráskódként, vagy PyInstaller-r
 Telepítsd a Python 3.14-et (a Windows-os exe ezzel készül; a korábban használt 3.9 támogatása megszűnt), lehetőleg egy virtuális környezetbe, majd a szükséges csomagokat:
 ```bash
 py -3.14 -m venv .venv314
-.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome pyinstaller
+.venv314\Scripts\python.exe -m pip install bleak pysolarmanv5 pycryptodome broadlink pyinstaller
 ```
-A legutóbb ellenőrzött verziók: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `pyinstaller 6.22.3`.
+A legutóbb ellenőrzött verziók: `bleak 3.0.2`, `pysolarmanv5 3.0.6`, `pycryptodome 3.23.0`, `broadlink 0.19.0`, `pyinstaller 6.22.3`.
 
 ### B) Futtatás Szimulációs Módban
 A webes felület és a szabályok teszteléséhez valódi hardver nélkül:
@@ -118,7 +125,7 @@ A jobb oldali **"Mérések & Visszacsatolás"** kártyán a legfontosabb teljes�
 *   **Összes töltési energia:** a BESEN töltő nyers telemetria-regiszterei csak az elsődleges fázis (L1) energia-akkumulációját követik. 3-fázisú töltés esetén (amikor L2 vagy L3 fázison is folyik áram) a vezérlő automatikusan 3.0-szoros szorzót alkalmaz a telemetria-értékre, hogy a műszerfalon a ténylegesen az akkumulátorba juttatott összes energia (kWh) jelenjen meg.
 
 ### C) Mobil navigáció (ikondokk)
-Mobil nézetben (keskeny képernyőn) a hagyományos fület-választó helyett egy félig átlátszó, jobb oldali ikondokk jelenik meg, ami a képernyő alsó harmadában, egykezes hüvelykujj-eléréssel kényelmesen elérhető. Az 5 ikon jelentése, fentről lefelé:
+Mobil nézetben (keskeny képernyőn) a hagyományos fület-választó helyett egy félig átlátszó, jobb oldali ikondokk jelenik meg, ami a képernyő alsó harmadában, egykezes hüvelykujj-eléréssel kényelmesen elérhető. A 8 ikon jelentése, fentről lefelé:
 
 | Ikon | Jelentés |
 |---|---|
@@ -126,9 +133,21 @@ Mobil nézetben (keskeny képernyőn) a hagyományos fület-választó helyett e
 | 🕐 (óra) | Ütemezett mód |
 | ✋ (kéz) | Kézi mód |
 | 📈 (aktivitás) | Mérések |
+| 🌡️ (hőmérő) | Klímavezérlés |
+| 💧 (csepp) | Bojler |
+| ☰ (vízszintes csíkok) | Árnyékolás |
 | 📄 (dokumentum) | Napló |
 
 A Kijelentkezés gomb mobilon a fejlécben, egy külön kis ikonként érhető el (csak akkor látszik, ha a webes hitelesítés be van kapcsolva). A gomb akkor is látszik, ha az oldal hibásan vagy üresen töltődik be.
+
+### D) Fejléc: állapotjelvények és fülek
+A fejlécben a cím („Otthonvezérlő”, alatta: „Helyi autótöltés és klíma vezérlő.”) mellett két jelvénycsoport látszik:
+*   **Kapcsolatok:** Inverter, Töltő, Hőmérő, Klíma1, Klíma2, Klíma3. **Zöld** = a kapcsolat él, **piros** = nem érhető el, **szürke** = nincs beállítva (nincs megadva az eszköz IP-címe a `config.json`-ban). A klímák jelvénye a hozzájuk tartozó BroadLink adó elérhetőségét mutatja.
+*   **Automatizmusok:** Auto solar, Auto ütemezett, Klíma, Bojler, Árnyékolás. A jelvény **világít (türkiz)**, ha az adott automatizmus be van kapcsolva, és szürke, ha nincs. A Klíma jelvény akkor világít, ha a Klímavezérlésben az „Automata bekapcsolva” el van mentve; az Árnyékolás akkor, ha legalább egy időzítő aktív. A Bojler egyelőre mindig szürke (később jön).
+
+Alattuk a **fülek**: Autótöltő, Klímavezérlés, Bojler, Árnyékolás. Minden fül teljesen külön oldal; asztali nézetben a Napló mindegyik oldal alján megjelenik (mobilon a saját ikonjával érhető el). A Klímavezérlés fülön a Mérések kártya az autótöltős rész nélkül, a „Hőmérő és klímák” sorokkal látszik.
+
+Mobilon a jelvények helyett két rövid állapotsor látszik („Kapcs.:” és „Auto.:” sor, színes pöttyökkel, ugyanazzal a jelentéssel), a fülek helyett pedig az ikondokk.
 
 ---
 
@@ -190,6 +209,7 @@ A szoftver számos biztonsági mechanizmust tartalmaz a hardver és a hálózat 
     *   **Egyetlen inverter-kapcsolat:** a program mindig legfeljebb egy kapcsolatot tart nyitva a Wi-Fi loggerrel (ami csak nagyon kevés párhuzamos kapcsolatot fogad). Kiesés után a régi kapcsolat lezárul, és a program újat épít — elárvult kapcsolatok nem halmozódnak fel, és nem foglalják el a logger szabad helyeit.
     *   **Ritkább lekérdezés töltés közben:** a program alapból 10 másodpercenként kérdezi a loggert, aktív autótöltés közben viszont 20 másodpercenként, mert az inverter csúcsterhelésénél a logger gyakran nem válaszol. Ennek ára, hogy Solar Auto töltés közben a ház-túlterhelés, az alsó SoC és a hálózati import miatti leállítás legfeljebb kb. 10 másodperccel később reagálhat (a töltő saját terheléskezelése ettől függetlenül véd).
     *   **Türelmes várakozás a loggerre:** a program egy-egy válaszra 15 másodpercig vár, mert a logger terhelés alatt gyakran 10–15 másodperc alatt válaszol. Egy lassú, de haladó lekérdezést a Watchdog nem tekint befagyásnak (a lekérdezés minden lépése után életjelet küld), egy valóban beragadtat viszont továbbra is észrevesz.
+    *   **Egy késés nem bontja a kapcsolatot:** ha a logger egyszer nem válaszol időben, a kapcsolat megmarad (a lekérdezés sikertelen, az Inverter jelzés erre az egy körre piros), és a következő lekérdezés ugyanazon a kapcsolaton megy. Csak **két egymás utáni** időtúllépés után zárja le és építi újra a kapcsolatot. Más hibáknál (pl. kapcsolati hiba) a kapcsolat továbbra is azonnal újraépül. A késve megérkező régi választ a program felismeri és eldobja.
     *   **Egyetlen kérés lekérdezésenként:** a program az inverter összes szükséges adatát egyetlen kéréssel olvassa ki a korábbi 6 helyett, így a loggert hatodannyi kérés terheli, és egy lekérdezés csak egyszer várakozik válaszra. Ha a logger ezt nem fogadná el, a program magától visszavált a 6 külön kérésre (a naplóban `[INVERTER]` sor jelzi a módot).
     *   Minden Bluetooth írási és értesítési kérés szigorú, 5 másodperces időkorláttal védett, a kapcsolat lezárása pedig 12 másodperces időkorláttal (egy elakadt lezárás naplózódik, és nem blokkolja a programot).
     *   **Kapcsolódási időtúllépés védelem:** a `BleakClient` kapcsolódási kísérletei (`client.connect()`) néha végtelenül beragadhatnak a Windows Bluetooth-verem belsejében. Ennek kezelésére a kapcsolódási kísérletek egy explicit, 20 másodperces aszinkron időkorláttal (`asyncio.wait_for`) vannak becsomagolva. Ha a kapcsolódás tovább tart, megszakad, a socket felszabadul, és új újracsatlakozási ciklus indul.
@@ -217,6 +237,7 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 *   **Max Hálózati Import (W)** - Hálózati türelem-határ. Ha efelett húzunk a hálózatról, leáll a töltés.
 *   **Hálózati Import Időkorlát (Perc)** - Mennyi ideig tolerálja a rendszer a fenti hálózati import túllépést, mielőtt leállítaná a töltést (pl. 5 perc, hogy a felhőátvonulásokat átvészelje).
 *   **Üzemmód Megjegyzése Újraindításkor** - Kapcsoló, amivel a vezérlő emlékszik a legutóbb használt módra (Auto/Schedule/Force).
+*   **Klímavezérlés és Árnyékolás:** a klímák beállításai (11. fejezet), az árnyékolás időzítői (12. fejezet) és a felületen megtanított infravörös/rádiós kódok is a `config.json`-ba mentődnek (`"climate"` és `"shading"` blokk), így áramszünet vagy újraindítás után visszatöltődnek. Az eszközök **IP-címét és a légtisztító kulcsát (token) viszont csak a `config.json`-ban lehet megadni**, a felületen nem — mintája a `config_example.json`-ban található.
 *   *Rejtett haladó beállítás (csak a `config.json`-ban módosítható)*: `"pbkdf2_iterations"` - A jelszó titkosítás erőssége (alapértelmezett: 100000). Gyengébb mikroszámítógépeken (pl. Raspberry Pi Zero) érdemes lehet csökkenteni (pl. 50000-re) a gyorsabb bejelentkezés érdekében. Ez az érték szabadon módosítható: a webes felület és az `AndroidWidget` mappában található widget is dinamikusan lekérdezi az aktuális beállítást a szervertől bejelentkezéskor, nem kell hozzájuk illeszteni a kliens oldalt.
 
 ---
@@ -267,6 +288,85 @@ A widget a szerverrel megegyező, titkosított kapcsolaton keresztül másodperc
 ### Biztonsági jegyzet
 
 A widget a dashboard-jelszót helyben, a telefon privát tárterületén (`SharedPreferences`) őrzi. Az alkalmazás `android:allowBackup="false"` beállítással tiltja az Android-mentést, hogy a jelszó ne legyen kinyerhető `adb backup`-pal. A widget és a szerver közötti kommunikáció végponttól végpontig titkosított (AES-256 + HMAC), a webes felülettel azonos módon.
+
+---
+
+## 11. Klímavezérlés
+
+A **Klímavezérlés** fülön 3 régi, nem okos klíma kezelhető a távirányítójuk infravörös jelével, BroadLink adókon keresztül. Hőmérőként egy Xiaomi légtisztító szolgál (hőmérséklet; a páratartalom csak kijelzés). A cél: napelemes **visszatáplálás** idején a klímák a felesleges energiából fűtsenek (télen) vagy hűtsenek (nyáron).
+
+**Jelenlegi állapot:** az eszközkapcsolat, a kódok tanítása, a kézi próba és a beállítások mentése működik. **Az automata még nem kapcsol semmit** — ez a következő fejlesztési lépésben jön (lásd lent, „Tervezett működés”).
+
+### Előfeltételek (egyszeri beállítás)
+1.  **BroadLink adók:** add hozzá őket a BroadLink alkalmazásban a Wi-Fi-hálózathoz, majd az eszköz beállításainál **kapcsold ki a „Lock device” opciót** (különben a program nem tud velük beszélni). Adj nekik **fix IP-címet** a routerben.
+2.  **Légtisztító:** szükség van a **kulcsára (token)**, ezt pl. a „Xiaomi Cloud Tokens Extractor” programmal lehet kiolvasni a Xiaomi-fiókból. Ha a légtisztítót később újra párosítod, a kulcs megváltozik. Ennek is adj **fix IP-címet**.
+3.  **Hálózat:** a vezérlőt futtató gép és az összes eszköz **ugyanazon a helyi hálózaton** legyen — vendéghálózatról az eszközök nem érhetők el.
+4.  **`config.json`:** írd be az IP-címeket és a kulcsot (a felületen ezek nem adhatók meg). Példa (a számok csak minták):
+    ```json
+    "climate": {
+        "sensor": {"ip": "192.168.0.50", "token": "<32 karakteres kulcs>"},
+        "units": [
+            {"name": "Nappali", "broadlink_ip": "192.168.0.51"},
+            {"name": "Háló", "broadlink_ip": "192.168.0.52"},
+            {"name": "Dolgozó", "broadlink_ip": "192.168.0.53"}
+        ]
+    }
+    ```
+    A `name` a helyiség neve (a felületen a „Klíma1–3” jelölés mellett látszik). A többi mezőt (kódok, beállítások) a program tölti ki a felületről.
+
+### Mérések: „Hőmérő és klímák”
+A Klímavezérlés fül Mérések kártyáján (az autótöltős rész nélkül) látszik a légtisztító állapota (hőmérséklet, páratartalom, utolsó frissítés), és klímánként, hogy mely kódok vannak már megtanítva (Fűtés BE / Hűtés BE / KI). A program **percenként** kiolvassa a légtisztítót és ellenőrzi a BroadLink adók elérhetőségét; ennek eredménye a fejléc Hőmérő és Klíma1–3 jelvényén látszik, a változásokat a Napló is rögzíti.
+
+### Kódok tanítása és kézi próba
+A Klímavezérlés kártya alján a becsukható **„Eszközök (tanítás, próba)”** rész tartalmazza klímánként a gombokat. Minden klímához három kód kell: **fűtés BE**, **hűtés BE** és **KI** (a klímák külön BE és KI kódot használnak, nem ki-be kapcsolót).
+1.  Állítsd be a távirányítón a kívánt állapotot (pl. fűtés, a kívánt hőfokkal).
+2.  Nyomd meg a megfelelő **„Tanítás …”** gombot, majd 30 másodpercen belül nyomd meg a távirányító gombját a BroadLink adó felé fordítva.
+3.  Siker esetén a kód a `config.json`-ba mentődik, és a ✓ jel megjelenik. A **„Próba …”** gombbal kipróbálhatod.
+
+### Beállítások
+A Klímavezérlés kártya tetején adhatók meg az automata beállításai. A **„Beállítások mentése”** gomb csak akkor ment, ha minden mező ki van töltve és érvényes — hibás vagy üres mezőnél semmi nem változik, és a program kiírja, melyik mezővel van gond.
+*   **Fűtés / Hűtés:** az üzemmód; ez dönti el, melyik BE kód megy ki.
+*   **Automata bekapcsolva:** az automata be- vagy kikapcsolása (a fejléc Klíma jelvénye ezt mutatja).
+*   **Akkuszint (%)**, **Célhőmérséklet (°C**, tizedes pontossággal, pl. `22.1`), **Bekapcsolási idő (perc)**, **Kikapcsolási idő (perc)**.
+*   **Klímánként:**
+    *   **Visszatermelés a bekapcsoláshoz (W):** az a visszatermelési **szint**, amelynél ez a klíma is menjen. Példa: `1500`, `2000`, `2500` W = ennyi visszatermelésnél akarok 1, 2, illetve 3 klímát használni. **A bekapcsolási sorrendet ezek a számok adják:** a legalacsonyabb küszöbű klíma indul először (egyenlő küszöbnél a kisebb sorszámú), a leállítás fordított sorrendben megy.
+    *   **Várható fogyasztás (W):** mennyit fogyaszt az adott klíma működés közben (lásd lent, miért kell).
+*   **Magyarázó sor:** minden klíma sora alatt a program kiírja, hogyan számol a gyakorlatban, gépelés közben is frissítve, pl. *„Bekapcsol, ha a visszatermelés + 1. klíma várható fogyasztása (600 W) eléri a 2000 W-ot.”* Ha a küszöböket átírod, a szövegek a küszöbök szerinti sorrendhez igazodnak.
+
+### Tervezett működés (a következő fejlesztési lépés, még nem működik)
+*   **Számolt termelés:** a mért visszatáplálás és a már futó klímák várható fogyasztásának összege. A hálózati mérőn a visszatáplálás negatív érték (pl. `−1500 W`), ezért a program a visszatáplálást a mérő értékének ellentettjeként számolja: exportnál pozitív, hálózati vételezésnél negatív szám. Így egy futó klíma a saját fogyasztása miatt nem kapcsol le, mert a fogyasztása visszaadódik a számításban.
+*   **Bekapcsolás:** a sorban következő klíma bekapcsol, ha megfelelő az akkuszint, a számolt termelés a „Bekapcsolási idő” percig eléri a klíma küszöbét, és a hőmérséklet megfelelő: **fűtésnél a mért hőmérséklet ≤ célhőmérséklet, hűtésnél ≥ célhőmérséklet** (tizedes pontossággal, minden klímánál ugyanaz a célérték). A hőmérséklet csak bekapcsoláskor számít; utána a klímák saját hőmérője szabályoz.
+*   **Kikapcsolás:** a legutóbb bekapcsolt klíma leáll, ha a számolt termelés a „Kikapcsolási idő” percig a küszöbe alatt marad; utána a következő ugyanígy.
+*   **Példa** (küszöbök 1500 / 2000 W, várható fogyasztás 600 / 700 W):
+    *   Nem megy klíma, a mérő `−1500 W` → számolt termelés 1500 → az 1. klíma bekapcsol.
+    *   Az 1. klíma megy, a mérő `−1400 W` → 1400 + 600 = 2000 → a 2. klíma is bekapcsol (ha a hőmérséklet még mindig megfelelő).
+    *   Felhő: a mérő `+200 W` (vételezés) → −200 + 600 + 700 = 1100 < 2000 → a 2. klíma leáll; utána a mérő kb. `−500 W` → 500 + 600 = 1100 < 1500 → az 1. klíma is leáll (mindkettő a türelmi idő után).
+
+---
+
+## 12. Árnyékolás
+
+Az **Árnyékolás** fülön egy rádiós távirányítós **redőny** és **napellenző** vezérelhető a BroadLink RM4 Pro rádiós adójával, napi időzítővel.
+
+### Beállítás
+*   A `config.json`-ban add meg az RM4 Pro IP-címét: `"shading": {"broadlink_ip": "192.168.0.51", ...}` (a szám csak minta; ugyanaz az RM4 Pro lehet, amelyik egy klímát is vezérel). A többi mezőt a program tölti ki a felületről.
+*   **Rádiós kódok tanítása** az oldal alján, a becsukható **„Eszközök (RF-tanítás, próba)”** részben, két lépésben:
+    1.  **Tartsd nyomva** a távirányító gombját a BroadLink felé fordítva, amíg a felület a 2. lépést nem mutatja (a BroadLink ekkor megkeresi a távirányító frekvenciáját).
+    2.  Engedd el, majd **egyszer** nyomd meg a gombot.
+    
+    Mindkét eszközhöz két kód kell: a redőnynél **Fel** és **Le**, a napellenzőnél **Be (Fel)** és **Ki (Le)**. A **„Próba …”** gombokkal kipróbálhatók.
+
+### Időzítő
+*   A **Redőny** és a **Napellenző** kártyán a hét minden napjára külön megadható egy **Fel** és egy **Le** időpont. Az **üres mező** azt jelenti, hogy aznap nincs mozgás.
+*   Az **„Időzítő aktív”** kapcsolóval a két eszköz időzítője egymástól függetlenül kikapcsolható.
+*   A program a megadott percben **egyszer** küldi el a jelet. Ha a program abban a percben nem fut (pl. áramszünet), az a mozgás kimarad, utólag nem pótolja.
+*   A beállítás a `config.json`-ba mentődik, és újraindítás vagy áramszünet után visszatöltődik. A fejléc Árnyékolás jelvénye akkor világít, ha legalább egy időzítő aktív.
+
+---
+
+## 13. Bojler
+
+A **Bojler** fül és a fejléc Bojler jelvénye jelenleg csak helyőrző: a vezérlése később készül el. Addig a jelvény szürke, az oldalon csak egy „Később.” feliratú kártya és (asztali nézetben) a Napló látszik.
 
 ---
 
