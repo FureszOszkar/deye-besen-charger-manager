@@ -129,6 +129,68 @@ async def run_climate_polling():
             waited += PONG_STEP_S
 
 
+# --- Klímavezérlés beállításai (felület) -------------------------------------------------
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == value  # NaN kizárva
+
+
+def update_climate_settings(data):
+    """A Klímavezérlés beállításainak ATOMI mentése a config.json-ba (a Solar Auto mintájára):
+    előbb minden mező ellenőrzése — üres/hibás mező esetén semmi nem változik —, csak utána
+    alkalmazás. Az automata a 2. fázisban használja őket. Visszatérés: (siker, üzenet)."""
+    if not isinstance(data, dict):
+        return False, "Hibás adatformátum."
+    mode = data.get("mode")
+    auto_enabled = data.get("auto_enabled")
+    units = data.get("units")
+    if mode not in ("heat", "cool"):
+        return False, "Érvénytelen üzemmód (fűtés/hűtés)."
+    if not isinstance(auto_enabled, bool):
+        return False, "Hibás adatformátum."
+    if not isinstance(units, list) or len(units) != cfg.CLIMATE_UNIT_COUNT:
+        return False, "Hibás adatformátum."
+
+    labels = {"soc": "Akkuszint", "target_temp": "Célhőmérséklet",
+              "on_minutes": "Bekapcsolási idő", "off_minutes": "Kikapcsolási idő"}
+    values = {}
+    for key, label in labels.items():
+        v = data.get(key)
+        if not _is_number(v):
+            return False, f"{label}: hiányzó vagy érvénytelen érték."
+        values[key] = v
+    if not 0 <= values["soc"] <= 100:
+        return False, "Akkuszint: 0 és 100 % között kell legyen."
+    for key in ("on_minutes", "off_minutes"):
+        if values[key] < 0:
+            return False, f"{labels[key]}: nem lehet negatív."
+
+    parsed_units = []
+    for i, unit in enumerate(units):
+        if not isinstance(unit, dict):
+            return False, "Hibás adatformátum."
+        w, exp = unit.get("surplus_w"), unit.get("expected_w")
+        if not _is_number(w) or w < 0:
+            return False, f"Klíma{i + 1}: a visszatermelés (W) hiányzik, érvénytelen vagy negatív."
+        if not _is_number(exp) or exp < 0:
+            return False, f"Klíma{i + 1}: a várható fogyasztás (W) hiányzik, érvénytelen vagy negatív."
+        parsed_units.append((w, exp))
+
+    with state_lock:
+        s = cfg.CLIMATE_CONFIG["settings"]
+        s["mode"] = mode
+        s["auto_enabled"] = auto_enabled
+        s.update(values)
+        for i, (w, exp) in enumerate(parsed_units):
+            cfg.CLIMATE_CONFIG["units"][i]["surplus_w"] = w
+            cfg.CLIMATE_CONFIG["units"][i]["expected_w"] = exp
+        cfg.refresh_climate_public_state()
+    save_config_file()
+    log_message(f"[KLÍMA] Beállítások mentve ({'fűtés' if mode == 'heat' else 'hűtés'}, "
+                f"automata {'bekapcsolva' if auto_enabled else 'kikapcsolva'}).")
+    return True, "Mentve."
+
+
 # --- IR-kód tanítása és kézi küldése (felület) -----------------------------------------
 
 def _check_unit_args(unit, which):

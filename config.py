@@ -44,10 +44,17 @@ DEFAULT_CONFIG = {
     "climate": {
         "sensor": {"ip": "", "token": ""},
         "units": [
-            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
-            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""},
-            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": ""}
-        ]
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": "",
+             "surplus_w": None, "expected_w": None},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": "",
+             "surplus_w": None, "expected_w": None},
+            {"name": "", "broadlink_ip": "", "ir_on_heat": "", "ir_on_cool": "", "ir_off": "",
+             "surplus_w": None, "expected_w": None}
+        ],
+        # A Klímavezérlés beállításai (a felületről menthetők). A számok alapértéke None (mint a
+        # Solar Auto mezőinél): a felhasználó adja meg őket; az automata a 2. fázisban használja.
+        "settings": {"mode": "heat", "auto_enabled": False, "soc": None, "target_temp": None,
+                     "on_minutes": None, "off_minutes": None}
     }
 }
 
@@ -216,6 +223,9 @@ def normalize_climate_config(raw):
         for key in ("ip", "token"):
             if isinstance(sensor.get(key), str):
                 result["sensor"][key] = sensor[key].strip()
+    def _num(value):
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
     units = raw.get("units")
     if isinstance(units, list):
         for i, unit in enumerate(units[:CLIMATE_UNIT_COUNT]):
@@ -224,6 +234,16 @@ def normalize_climate_config(raw):
             for key in ("name", "broadlink_ip", "ir_on_heat", "ir_on_cool", "ir_off"):
                 if isinstance(unit.get(key), str):
                     result["units"][i][key] = unit[key].strip()
+            for key in ("surplus_w", "expected_w"):
+                result["units"][i][key] = _num(unit.get(key))
+    settings = raw.get("settings")
+    if isinstance(settings, dict):
+        dst = result["settings"]
+        if settings.get("mode") in ("heat", "cool"):
+            dst["mode"] = settings["mode"]
+        dst["auto_enabled"] = bool(settings.get("auto_enabled", False))
+        for key in ("soc", "target_temp", "on_minutes", "off_minutes"):
+            dst[key] = _num(settings.get(key))
     return result
 
 
@@ -280,9 +300,12 @@ def refresh_climate_public_state():
     pub = shared_state["climate"]
     pub["sensor"]["ip"] = CLIMATE_CONFIG["sensor"]["ip"]
     pub["sensor"]["token_set"] = bool(CLIMATE_CONFIG["sensor"]["token"])
+    pub["settings"] = dict(CLIMATE_CONFIG["settings"])
     for i, unit in enumerate(CLIMATE_CONFIG["units"]):
         pub["units"][i]["name"] = unit["name"]
         pub["units"][i]["broadlink_ip"] = unit["broadlink_ip"]
+        pub["units"][i]["surplus_w"] = unit["surplus_w"]
+        pub["units"][i]["expected_w"] = unit["expected_w"]
         pub["units"][i]["has_on_heat"] = bool(unit["ir_on_heat"])
         pub["units"][i]["has_on_cool"] = bool(unit["ir_on_cool"])
         pub["units"][i]["has_off"] = bool(unit["ir_off"])

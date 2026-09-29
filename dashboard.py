@@ -1303,6 +1303,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 0.75rem;
             color: var(--text-muted);
         }
+        .climate-col-short { display: none; }
+        .climate-unit-explain {
+            grid-column: 1 / -1;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin: -0.2rem 0 0.3rem;
+        }
         .climate-unit-label {
             font-size: 0.85rem;
             overflow: hidden;
@@ -1364,8 +1371,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 grid-template-columns: 1fr;
             }
             .climate-unit-settings {
-                grid-template-columns: 5rem 1fr 1fr;
+                grid-template-columns: 4rem 1fr 1fr;
             }
+            .climate-col-full { display: none; }
+            .climate-col-short { display: inline; }
         }
 
         .checkbox-group {
@@ -2047,47 +2056,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <!-- FŰTÉS (KLÍMÁK) — csak a Fűtés fülön; a rácsban a bal hasábba esik (a Mérések előtt) -->
         <div class="card" id="climate-card" style="display: none; flex-direction: column; gap: 1rem;">
             <div class="card-title">Klímavezérlés</div>
-            <!-- A beállító mezők a 2. fázisban kapnak működést; addig csak megjelennek (letiltva). -->
-            <div class="climate-status">A beállítások a 2. fázisban (automata szabályok) kapnak működést.</div>
+            <!-- A beállítások menthetők (config.json); az automata a 2. fázisban kapja meg a működést. -->
+            <div class="climate-status">A beállítások menthetők; maga az automata a 2. fázisban kap működést, addig nem kapcsol semmit.</div>
 
             <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
                 <div class="climate-mode-switch">
-                    <button type="button" class="climate-mode-btn active" disabled>Fűtés</button>
-                    <button type="button" class="climate-mode-btn" disabled>Hűtés</button>
+                    <button type="button" class="climate-mode-btn active" id="climate_mode_heat" onclick="setClimateMode('heat')">Fűtés</button>
+                    <button type="button" class="climate-mode-btn" id="climate_mode_cool" onclick="setClimateMode('cool')">Hűtés</button>
                 </div>
-                <label class="checkbox-group"><input type="checkbox" id="climate_auto_enabled" disabled> Automata bekapcsolva</label>
+                <label class="checkbox-group"><input type="checkbox" id="climate_auto_enabled"> Automata bekapcsolva</label>
             </div>
 
             <div class="climate-block-title">Bekapcsolás és kikapcsolás</div>
             <div class="climate-grid">
                 <div class="input-group">
                     <label for="climate_soc">Akkuszint (%)</label>
-                    <input type="number" id="climate_soc" disabled>
+                    <input type="number" id="climate_soc" min="0" max="100" step="1">
                 </div>
                 <div class="input-group">
                     <label for="climate_target_temp">Célhőmérséklet (°C)</label>
-                    <input type="number" id="climate_target_temp" disabled>
+                    <input type="number" id="climate_target_temp" step="0.1">
                 </div>
                 <div class="input-group">
                     <label for="climate_on_minutes">Bekapcsolási idő (perc)</label>
-                    <input type="number" id="climate_on_minutes" disabled>
+                    <input type="number" id="climate_on_minutes" min="0" step="1">
                 </div>
                 <div class="input-group">
                     <label for="climate_off_minutes">Kikapcsolási idő (perc)</label>
-                    <input type="number" id="climate_off_minutes" disabled>
+                    <input type="number" id="climate_off_minutes" min="0" step="1">
                 </div>
             </div>
 
             <div class="climate-block-title">Klímánként</div>
             <div class="climate-unit-settings">
-                <span></span><span class="climate-col-head">Visszatermelés a bekapcsoláshoz (W)</span><span class="climate-col-head">Hőmérséklet-eltolás (°C)</span>
-                <span class="climate-unit-label" id="climate_unit_label_0">1. klíma</span><input type="number" disabled><input type="number" disabled>
-                <span class="climate-unit-label" id="climate_unit_label_1">2. klíma</span><input type="number" disabled><input type="number" disabled>
-                <span class="climate-unit-label" id="climate_unit_label_2">3. klíma</span><input type="number" disabled><input type="number" disabled>
+                <span></span><span class="climate-col-head"><span class="climate-col-full">Visszatermelés a bekapcsoláshoz (W)</span><span class="climate-col-short">Bekapcs. (W)</span></span><span class="climate-col-head"><span class="climate-col-full">Várható fogyasztás (W)</span><span class="climate-col-short">Fogyaszt. (W)</span></span>
+                <span class="climate-unit-label" id="climate_unit_label_0">1. klíma</span><input type="number" id="climate_unit_w_0" min="0" step="1" oninput="renderClimateExplain()"><input type="number" id="climate_unit_expected_0" min="0" step="1" oninput="renderClimateExplain()"><div class="climate-unit-explain" id="climate_unit_explain_0"></div>
+                <span class="climate-unit-label" id="climate_unit_label_1">2. klíma</span><input type="number" id="climate_unit_w_1" min="0" step="1" oninput="renderClimateExplain()"><input type="number" id="climate_unit_expected_1" min="0" step="1" oninput="renderClimateExplain()"><div class="climate-unit-explain" id="climate_unit_explain_1"></div>
+                <span class="climate-unit-label" id="climate_unit_label_2">3. klíma</span><input type="number" id="climate_unit_w_2" min="0" step="1" oninput="renderClimateExplain()"><input type="number" id="climate_unit_expected_2" min="0" step="1" oninput="renderClimateExplain()"><div class="climate-unit-explain" id="climate_unit_explain_2"></div>
             </div>
 
             <div>
-                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" disabled>Beállítások mentése</button>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveClimateSettings()">Beállítások mentése</button>
             </div>
 
             <!-- Ritkán használt: IR-kód tanítás és kézi próba. Alapból becsukva. -->
@@ -4059,8 +4068,109 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 (state === 'active' ? ' active' : state === 'inactive' ? ' inactive' : '');
         }
 
+        let climateFormLoaded = false;
+        let climateMode = 'heat';
+
+        function setClimateMode(mode) {
+            climateMode = mode;
+            document.getElementById('climate_mode_heat').classList.toggle('active', mode === 'heat');
+            document.getElementById('climate_mode_cool').classList.toggle('active', mode === 'cool');
+        }
+
+        // Üres mező -> NaN -> a JSON-ben null -> a szerver elutasítja (nincs "|| alapérték" kitöltés)
+        function numField(id, isFloat) {
+            const v = document.getElementById(id).value;
+            return isFloat ? parseFloat(v) : parseInt(v, 10);
+        }
+
+        async function saveClimateSettings() {
+            const units = [];
+            for (let i = 0; i < CLIMATE_UNIT_COUNT; i++) {
+                units.push({ surplus_w: numField('climate_unit_w_' + i, false), expected_w: numField('climate_unit_expected_' + i, false) });
+            }
+            const body = {
+                mode: climateMode,
+                auto_enabled: document.getElementById('climate_auto_enabled').checked,
+                soc: numField('climate_soc', false),
+                target_temp: numField('climate_target_temp', true),
+                on_minutes: numField('climate_on_minutes', false),
+                off_minutes: numField('climate_off_minutes', false),
+                units: units
+            };
+            try {
+                const response = await fetch('/api/climate/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const res = await response.json();
+                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
+                climateFormLoaded = false;
+                updateStatus();
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        function fillClimateForm(c) {
+            const st = c.settings || {};
+            const val = v => (typeof v === 'number') ? String(v) : '';
+            setClimateMode(st.mode === 'cool' ? 'cool' : 'heat');
+            document.getElementById('climate_auto_enabled').checked = !!st.auto_enabled;
+            document.getElementById('climate_soc').value = val(st.soc);
+            document.getElementById('climate_target_temp').value = val(st.target_temp);
+            document.getElementById('climate_on_minutes').value = val(st.on_minutes);
+            document.getElementById('climate_off_minutes').value = val(st.off_minutes);
+            (c.units || []).forEach((u, i) => {
+                const w = document.getElementById('climate_unit_w_' + i);
+                const exp = document.getElementById('climate_unit_expected_' + i);
+                if (w) w.value = val(u.surplus_w);
+                if (exp) exp.value = val(u.expected_w);
+            });
+            renderClimateExplain();
+        }
+
+        // A klímák bekapcsolási sorrendje a küszöbök szerint növekvő (egyenlőnél a kisebb sorszám az első).
+        // Minden klíma alatt kiírjuk, hogyan számolunk: a megelőző klímák várható fogyasztása hozzáadódik.
+        let climateUnitNames = [];
+        function hunArticle(n) {
+            // "a" / "az" a szám kiejtése szerint (1, 1xxx: egy/ezer; 5…: öt… → "az")
+            const digits = String(Math.floor(Math.abs(n)));
+            const f = digits[0], len = digits.length;
+            return (f === '5' || (f === '1' && (len === 1 || len === 4 || len === 7))) ? 'az' : 'a';
+        }
+        function renderClimateExplain() {
+            const units = [];
+            for (let i = 0; i < CLIMATE_UNIT_COUNT; i++) {
+                const t = parseFloat(document.getElementById('climate_unit_w_' + i).value);
+                const e = parseFloat(document.getElementById('climate_unit_expected_' + i).value);
+                units.push({ i, t, e, name: climateUnitNames[i] || climateUnitName(null, i) });
+            }
+            const ordered = units.filter(u => !isNaN(u.t)).sort((a, b) => (a.t - b.t) || (a.i - b.i));
+            units.forEach(u => {
+                const box = document.getElementById('climate_unit_explain_' + u.i);
+                if (!box) return;
+                if (isNaN(u.t)) { box.textContent = 'Add meg a küszöböt.'; return; }
+                const before = ordered.slice(0, ordered.indexOf(u));
+                const target = `${hunArticle(u.t)} ${u.t} W-ot`;
+                if (!before.length) {
+                    box.textContent = `Bekapcsol, ha a visszatermelés eléri ${target}.`;
+                    return;
+                }
+                const names = before.map(b => b.name);
+                const nameText = names.length > 1 ? names.slice(0, -1).join(', ') + ' és ' + names[names.length - 1] : names[0];
+                const watts = before.map(b => isNaN(b.e) ? '–' : String(b.e)).join(' + ');
+                box.textContent = `Bekapcsol, ha a visszatermelés + ${nameText} várható fogyasztása (${watts} W) eléri ${target}.`;
+            });
+        }
+
         function renderClimate(c) {
             buildClimateUnits();
+            // Az űrlapot csak egyszer töltjük ki (és mentés után), hogy a 2 mp-es frissítés ne írja felül a gépelést
+            if (!climateFormLoaded) {
+                fillClimateForm(c);
+                climateFormLoaded = true;
+            }
 
             // Kapcsolatok: Hőmérő és Klíma1–3 (nincs beállítva = szürke)
             const sensor = c.sensor || {};
@@ -4073,7 +4183,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 setMobileDot('mobile-status-unit-' + i, st, false);
             });
             // Automatizmusok: Klíma (a 2. fázisban kap működést, addig kikapcsolt)
-            const climateAuto = c.auto_enabled === true ? 'active' : 'off';
+            const climateAuto = (c.settings && c.settings.auto_enabled === true) ? 'active' : 'off';
             setHeaderBadge('badge-toggle-climate', climateAuto);
             setMobileDot('mobile-status-climate', climateAuto, true);
 
@@ -4107,6 +4217,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Beállítások: a klíma neve a sor elején
                 const label = document.getElementById('climate_unit_label_' + i);
                 if (label) label.textContent = name;
+                climateUnitNames[i] = name;
 
                 // Eszközök rész: a fejléc jelvényével egyező jelölés (Klíma1–3) + helyiség + BroadLink IP
                 const title = document.getElementById('climate_dev_title_' + i);
@@ -4127,6 +4238,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     res.innerHTML = html;
                 }
             });
+            renderClimateExplain();   // a klímanevek frissülése után
         }
 
         async function climateAction(url, unit, code) {
@@ -4543,6 +4655,15 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     ok, msg = shading_logic.start_learn(data.get("device"), data.get("action"))
                 else:
                     ok, msg = shading_logic.send_code(data.get("device"), data.get("action"))
+                self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
+            except Exception as e:
+                self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
+
+        elif self.path == '/api/climate/settings':
+            # Klímavezérlés beállításai (config.json; az automata a 2. fázisban használja)
+            try:
+                data = self._read_encrypted_body()
+                ok, msg = climate_logic.update_climate_settings(data)
                 self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
             except Exception as e:
                 self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
