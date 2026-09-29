@@ -3799,7 +3799,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const div = document.createElement('div');
                 div.className = 'climate-block';
                 div.innerHTML = `
-                    <div class="climate-block-title" id="climate_dev_title_${i}">${i + 1}. klíma</div>
+                    <div class="climate-block-title" id="climate_dev_title_${i}">Klíma${i + 1}</div>
                     <div id="climate_unit_result_${i}" class="climate-status"></div>
                     <div class="climate-btns">
                         <button type="button" class="action-btn action-btn-soft" onclick="climateLearn(${i}, 'heat_on')">Tanítás fűtés BE</button>
@@ -3876,9 +3876,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const label = document.getElementById('climate_unit_label_' + i);
                 if (label) label.textContent = name;
 
-                // Eszközök rész: név + az utolsó művelet eredménye
+                // Eszközök rész: a fejléc jelvényével egyező jelölés (Klíma1–3) + helyiség + BroadLink IP
                 const title = document.getElementById('climate_dev_title_' + i);
-                if (title) title.textContent = name + (u.broadlink_ip ? ` (${u.broadlink_ip})` : ' — nincs BroadLink IP');
+                if (title) title.textContent = `Klíma${i + 1}` + (u.name ? ` — ${u.name}` : '') +
+                    (u.broadlink_ip ? ` (${u.broadlink_ip})` : ' — nincs BroadLink IP');
                 const res = document.getElementById('climate_unit_result_' + i);
                 if (res) {
                     const busy = {learn_heat_on: 'Fűtés BE kód tanítása folyamatban...', learn_cool_on: 'Hűtés BE kód tanítása folyamatban...',
