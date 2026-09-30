@@ -145,7 +145,7 @@ Next to the title ("Otthonvezérlő", subtitle: "Helyi autótöltés és klíma 
 *   **Connections (Kapcsolatok):** Inverter, Töltő (charger), Hőmérő (thermometer), Klíma1, Klíma2, Klíma3. **Green** = the connection is alive, **red** = not reachable, **grey** = not configured (the device IP address is not set in `config.json`). The air conditioner badges show the reachability of their BroadLink transmitter.
 *   **Automations (Automatizmusok):** Auto solar, Auto ütemezett (scheduled), Klíma, Bojler, Árnyékolás (shading). A badge **lights up (cyan)** when that automation is enabled, and is grey when it is not. The Klíma badge lights up when "Automata bekapcsolva" (automation enabled) is saved in the air conditioner control; the Árnyékolás badge when at least one timer is active. The Bojler badge is always grey for now (comes later).
 
-Below them are the **tabs**: Autótöltő (car charger), Klímavezérlés (air conditioner control), Bojler (boiler), Árnyékolás (shading), Egyéb (other). The **Egyéb** tab is only available in desktop view (it has no icon on mobile); it holds devices that fit nowhere else — currently the internet radio (Section 14). Each tab is a completely separate page; in desktop view the Log appears at the bottom of every page (on mobile it has its own icon). On the Klímavezérlés tab the Measurements card is shown without the car charger part, with the "Hőmérő és klímák" (thermometer and air conditioners) rows.
+Below them are the **tabs**: Autótöltő (car charger), Klímavezérlés (air conditioner control), Bojler (boiler), Árnyékolás (shading), Egyéb (other). The **Egyéb** tab is only available in desktop view (it has no icon on mobile); it holds devices that fit nowhere else — currently the internet radio (left column) and the smart plug (right column), see Section 14. Each tab is a completely separate page; in desktop view the Log appears at the bottom of every page (on mobile it has its own icon). On the Klímavezérlés tab the Measurements card is shown without the car charger part, with the "Hőmérő és klímák" (thermometer and air conditioners) rows.
 
 On mobile, instead of the badges, two short status rows are shown ("Kapcs.:" and "Auto.:" rows with coloured dots, same meaning), and the icon dock replaces the tabs.
 
@@ -381,9 +381,10 @@ The app asks for the server address and the password — the same stored setting
 *   **Energy tiles** with small icons: solar, grid, battery, house — with the same colour code as the web Measurements card (grid green = export, red = import; battery green = charging, red = discharging).
 *   **Car charger:** the mode, and while charging the current power **in red**; **Indítás** (start = the web "Kézi indítás") and **Leállítás** (stop = the web "Ideiglenes leállítás", soft stop). If the Solar Auto or Scheduled automation is enabled, **the whole tile pulses**.
 *   **Air conditioners:** temperature and humidity (from the air purifier), "Utoljára: …" (the last command sent and its time — IR is one-way, the program does not know the real state of the air conditioner), **Fűtés BE / Hűtés BE / KI** (heating ON / cooling ON / OFF) buttons. If the climate automation is enabled, the tiles pulse.
-*   **Roller shutter, awning:** up/down buttons; the arrow (›) opens the weekly timer (the same timer as on the web Árnyékolás page).
-*   **LED strip, plug:** tapping the tile = on/off; the arrow (›) opens the details (LED: brightness, colour; plug: daily timer).
-*   **Internet radio:** "Utoljára: power …" (the time of the last button press sent) and the timer state; tapping the tile and the **"Be/Ki (power)"** button both send one power button press; the arrow (›) opens the daily timer.
+*   **Roller shutter, awning, LED strip, plug, internet radio:** tapping anywhere on the tile (or the arrow ›) opens the details; **switching is only possible with the tile's buttons**, so opening the details never switches by accident.
+*   **Roller shutter, awning:** up/down buttons; the details hold the weekly timer (the same as on the web Árnyékolás page).
+*   **LED strip, plug:** **Be** (on) and **Ki** (off) buttons; the details hold LED: brightness, colour; plug: daily timer with two on/off pairs.
+*   **Internet radio:** "Utoljára: power …" (the time of the last button press sent) and the timer state; the **"Be/Ki (power)"** button sends one power button press; the details hold the daily timer.
 *   While the app is in the foreground it refreshes every 2 seconds (like the web dashboard); in the background it does not query.
 *   The appearance follows the phone's setting: light or **dark mode**.
 
@@ -393,7 +394,9 @@ The app asks for the server address and the password — the same stored setting
 
 ### Xiaomi smart plug
 *   Controlled locally, with the same protocol as the air purifier (miIO). Its **key (token)** and **model identifier** (e.g. `chuangmi.plug.hmi206`) are needed — both are printed by the same "Xiaomi Cloud Tokens Extractor" as for the air purifier. Fixed IP in the router.
-*   **Daily timer:** an on and an off time for every day of the week (empty = no switching that day), with a "Időzítő aktív" (timer active) switch. The program switches **once** in the given minute; if it is not running in that minute, the switching is skipped (no catch-up). The setting is saved to `config.json`.
+*   **Web dashboard:** it is also shown on the desktop view's **Egyéb** tab (right column): state (on/off, reachable or not), **Bekapcsolás** (switch on) and **Kikapcsolás** (switch off) buttons, and the timer below.
+*   **Daily timer with two on/off pairs** (e.g. a lamp in the morning and in the evening): for every day of the week **1. Be / 1. Ki / 2. Be / 2. Ki** (1st on / 1st off / 2nd on / 2nd off) times (empty = no switching in that pair that day), with a "Időzítő aktív" (timer active) switch. The app and the web show the same timer; in the app the days are shown with short names (H, K, Sze…) in one row. The program switches **once** in the given minute; if it is not running in that minute, the switching is skipped (no catch-up). The setting is saved to `config.json`; an old single-pair setting goes into the 1st pair.
+*   Only the new app can save the two-pair timer: a save from the old app (one pair) is rejected by the program, so it cannot delete the 2nd pair — update the app.
 
 ### Internet radio (infrared, BroadLink)
 *   The radio's infrared remote is imitated by an existing BroadLink transmitter (e.g. the living-room air conditioner's). The remote has **a single power button**, so **one code** has to be learned: "Be" (on) and "Ki" (off) both send the same button press, and the radio switches to its opposite state. IR is one-way, the program does not know the real state of the radio — if it is not in the state you expect, the button press switches it the other way.
@@ -409,7 +412,7 @@ The app asks for the server address and the password — the same stored setting
     "radio": {"name": "Internet-rádió", "broadlink_ip": "192.168.0.62"}
 }
 ```
-(The numbers are only samples. The timers and the radio's learned code are filled in by the program.) The program queries the state of the LED strip and the plug on the local network **every minute**, and right after a command, so the app shows a fresh state even if you switched them with the wall button or elsewhere. These two devices do not appear on the web dashboard, only in the app; the radio is also on the web Egyéb tab.
+(The numbers are only samples. The timers and the radio's learned code are filled in by the program.) The program queries the state of the LED strip and the plug on the local network **every minute**, and right after a command, so the app shows a fresh state even if you switched them with the wall button or elsewhere. The LED strip appears only in the app; the plug and the radio are also on the web Egyéb tab.
 
 ---
 

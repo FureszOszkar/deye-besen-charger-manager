@@ -145,7 +145,7 @@ A fejlécben a cím („Otthonvezérlő”, alatta: „Helyi autótöltés és k
 *   **Kapcsolatok:** Inverter, Töltő, Hőmérő, Klíma1, Klíma2, Klíma3. **Zöld** = a kapcsolat él, **piros** = nem érhető el, **szürke** = nincs beállítva (nincs megadva az eszköz IP-címe a `config.json`-ban). A klímák jelvénye a hozzájuk tartozó BroadLink adó elérhetőségét mutatja.
 *   **Automatizmusok:** Auto solar, Auto ütemezett, Klíma, Bojler, Árnyékolás. A jelvény **világít (türkiz)**, ha az adott automatizmus be van kapcsolva, és szürke, ha nincs. A Klíma jelvény akkor világít, ha a Klímavezérlésben az „Automata bekapcsolva” el van mentve; az Árnyékolás akkor, ha legalább egy időzítő aktív. A Bojler egyelőre mindig szürke (később jön).
 
-Alattuk a **fülek**: Autótöltő, Klímavezérlés, Bojler, Árnyékolás, Egyéb. Az **Egyéb** fül csak asztali nézetben érhető el (mobilon nincs ikonja); ide kerülnek azok az eszközök, amelyek máshová nem illenek — jelenleg az internet-rádió (14. fejezet). Minden fül teljesen külön oldal; asztali nézetben a Napló mindegyik oldal alján megjelenik (mobilon a saját ikonjával érhető el). A Klímavezérlés fülön a Mérések kártya az autótöltős rész nélkül, a „Hőmérő és klímák” sorokkal látszik.
+Alattuk a **fülek**: Autótöltő, Klímavezérlés, Bojler, Árnyékolás, Egyéb. Az **Egyéb** fül csak asztali nézetben érhető el (mobilon nincs ikonja); ide kerülnek azok az eszközök, amelyek máshová nem illenek — jelenleg az internet-rádió (bal hasáb) és a konnektor (jobb hasáb), lásd a 14. fejezetet. Minden fül teljesen külön oldal; asztali nézetben a Napló mindegyik oldal alján megjelenik (mobilon a saját ikonjával érhető el). A Klímavezérlés fülön a Mérések kártya az autótöltős rész nélkül, a „Hőmérő és klímák” sorokkal látszik.
 
 Mobilon a jelvények helyett két rövid állapotsor látszik („Kapcs.:” és „Auto.:” sor, színes pöttyökkel, ugyanazzal a jelentéssel), a fülek helyett pedig az ikondokk.
 
@@ -381,9 +381,10 @@ Az app a szerver címét és a jelszót kéri — ugyanaz a tárolt beállítás
 *   **Energia-csempék** kis ikonokkal: napelem, hálózat, akku, ház — ugyanazzal a színkóddal, mint a webes Mérések kártyán (hálózat zöld = visszatáplálás, piros = vételezés; akku zöld = töltődik, piros = merül).
 *   **Autótöltő:** a mód, töltés közben az aktuális teljesítmény **pirossal**; **Indítás** (= a webes „Kézi indítás”) és **Leállítás** (= a webes „Ideiglenes leállítás”, soft stop). Ha a Solar Auto vagy az Ütemezett automatizmus be van kapcsolva, **az egész csempe lüktet**.
 *   **Klímák:** hőmérséklet és páratartalom (a légtisztítóé), „Utoljára: …” (az utoljára küldött parancs és ideje — az infra egyirányú, a klíma valódi állapotát a program nem tudja), **Fűtés BE / Hűtés BE / KI** gombok. Ha a klíma-automata be van kapcsolva, a csempék lüktetnek.
-*   **Redőny, napellenző:** Fel/Le (Be/Ki) gombok; a nyíl (›) a heti időzítőt nyitja (ugyanaz az időzítő, mint a webes Árnyékolás oldalon).
-*   **LED-szalag, konnektor:** koppintás a csempére = be/ki; a nyíl (›) a részleteket nyitja (LED: fényerő, szín; konnektor: napi időzítő).
-*   **Internet-rádió:** „Utoljára: power …” (az utoljára küldött gombnyomás ideje) és az időzítő állapota; a csempére koppintás és a **„Be/Ki (power)”** gomb is egy power gombnyomást küld; a nyíl (›) a napi időzítőt nyitja.
+*   **Redőny, napellenző, LED-szalag, konnektor, internet-rádió:** a csempére bárhol koppintva (vagy a nyíllal ›) a részletek nyílnak; **kapcsolni csak a csempe gombjaival lehet**, így a részletek megnyitása nem kapcsol véletlenül.
+*   **Redőny, napellenző:** Fel/Le (Be/Ki) gombok; a részleteken a heti időzítő (ugyanaz, mint a webes Árnyékolás oldalon).
+*   **LED-szalag, konnektor:** **Be** és **Ki** gomb; a részleteken LED: fényerő, szín; konnektor: napi időzítő két be-ki párral.
+*   **Internet-rádió:** „Utoljára: power …” (az utoljára küldött gombnyomás ideje) és az időzítő állapota; a **„Be/Ki (power)”** gomb egy power gombnyomást küld; a részleteken a napi időzítő.
 *   Amíg az app előtérben van, 2 másodpercenként frissül (mint a webes felület); háttérben nem kérdez.
 *   A megjelenés a telefon beállítását követi: világos vagy **sötét mód**.
 
@@ -393,7 +394,9 @@ Az app a szerver címét és a jelszót kéri — ugyanaz a tárolt beállítás
 
 ### Xiaomi okos konnektor
 *   Helyben, a légtisztítóéval azonos protokollon (miIO) vezérelhető. Kell hozzá a **kulcsa (token)** és a **típusazonosítója** (pl. `chuangmi.plug.hmi206`) — mindkettőt ugyanaz a „Xiaomi Cloud Tokens Extractor” írja ki, mint a légtisztítónál. Fix IP a routerben.
-*   **Napi időzítő:** a hét minden napjára egy Be és egy Ki időpont (üres = aznap nincs kapcsolás), „Időzítő aktív” kapcsolóval. A program a megadott percben **egyszer** kapcsol; ha abban a percben nem fut, a kapcsolás kimarad (nincs pótlás). A beállítás a `config.json`-ba mentődik.
+*   **Webes felület:** az asztali nézet **Egyéb** fülén (jobb hasáb) is látszik: állapot (be/ki, elérhető-e), **Bekapcsolás** és **Kikapcsolás** gomb, alatta az időzítő.
+*   **Napi időzítő, két be-ki párral** (pl. lámpa reggel és este): a hét minden napjára **1. Be / 1. Ki / 2. Be / 2. Ki** időpont (üres = aznap abban a párban nincs kapcsolás), „Időzítő aktív” kapcsolóval. Az appban és a weben ugyanaz az időzítő; az appban a napok rövid névvel (H, K, Sze…), egy sorban látszanak. A program a megadott percben **egyszer** kapcsol; ha abban a percben nem fut, a kapcsolás kimarad (nincs pótlás). A beállítás a `config.json`-ba mentődik; egy régi, egy páros beállítás az 1. párba kerül.
+*   A két páros időzítőt csak az új app tudja menteni: a régi app (egy párral) mentését a program elutasítja, hogy ne törölje a 2. párt — frissítsd az appot.
 
 ### Internet-rádió (infra, BroadLink)
 *   A rádió infravörös távirányítóját egy meglévő BroadLink adó utánozza (pl. a nappali klímáé). A távirányítón **egyetlen power gomb** van, ezért **egy kódot** kell megtanítani: a „Be” és a „Ki” is ugyanazt a gombnyomást küldi, a rádió az ellenkező állapotába vált. Az infra egyirányú, a rádió valódi állapotát a program nem tudja — ha épp nem abban az állapotban van, amire számítasz, a gombnyomás az ellenkezőjére kapcsolja.
@@ -409,7 +412,7 @@ Az app a szerver címét és a jelszót kéri — ugyanaz a tárolt beállítás
     "radio": {"name": "Internet-rádió", "broadlink_ip": "192.168.0.62"}
 }
 ```
-(A számok csak minták. Az időzítőket és a rádió megtanított kódját a program tölti ki.) A program **percenként** lekérdezi a LED-szalag és a konnektor állapotát a helyi hálózaton, és parancs után azonnal is, így az app akkor is friss állapotot mutat, ha a fali gombbal vagy máshonnan kapcsoltad őket. Ez a két eszköz a webes felületen nem jelenik meg, csak az appban; a rádió a webes Egyéb fülön is.
+(A számok csak minták. Az időzítőket és a rádió megtanított kódját a program tölti ki.) A program **percenként** lekérdezi a LED-szalag és a konnektor állapotát a helyi hálózaton, és parancs után azonnal is, így az app akkor is friss állapotot mutat, ha a fali gombbal vagy máshonnan kapcsoltad őket. A LED-szalag csak az appban jelenik meg; a konnektor és a rádió a webes Egyéb fülön is.
 
 ---
 
