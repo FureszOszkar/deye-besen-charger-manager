@@ -145,7 +145,7 @@ A fejlécben a cím („Otthonvezérlő”, alatta: „Helyi autótöltés és k
 *   **Kapcsolatok:** Inverter, Töltő, Hőmérő, Klíma1, Klíma2, Klíma3. **Zöld** = a kapcsolat él, **piros** = nem érhető el, **szürke** = nincs beállítva (nincs megadva az eszköz IP-címe a `config.json`-ban). A klímák jelvénye a hozzájuk tartozó BroadLink adó elérhetőségét mutatja.
 *   **Automatizmusok:** Auto solar, Auto ütemezett, Klíma, Bojler, Árnyékolás. A jelvény **világít (türkiz)**, ha az adott automatizmus be van kapcsolva, és szürke, ha nincs. A Klíma jelvény akkor világít, ha a Klímavezérlésben az „Automata bekapcsolva” el van mentve; az Árnyékolás akkor, ha legalább egy időzítő aktív. A Bojler egyelőre mindig szürke (később jön).
 
-Alattuk a **fülek**: Autótöltő, Klímavezérlés, Bojler, Árnyékolás. Minden fül teljesen külön oldal; asztali nézetben a Napló mindegyik oldal alján megjelenik (mobilon a saját ikonjával érhető el). A Klímavezérlés fülön a Mérések kártya az autótöltős rész nélkül, a „Hőmérő és klímák” sorokkal látszik.
+Alattuk a **fülek**: Autótöltő, Klímavezérlés, Bojler, Árnyékolás, Egyéb. Az **Egyéb** fül csak asztali nézetben érhető el (mobilon nincs ikonja); ide kerülnek azok az eszközök, amelyek máshová nem illenek — jelenleg az internet-rádió (14. fejezet). Minden fül teljesen külön oldal; asztali nézetben a Napló mindegyik oldal alján megjelenik (mobilon a saját ikonjával érhető el). A Klímavezérlés fülön a Mérések kártya az autótöltős rész nélkül, a „Hőmérő és klímák” sorokkal látszik.
 
 Mobilon a jelvények helyett két rövid állapotsor látszik („Kapcs.:” és „Auto.:” sor, színes pöttyökkel, ugyanazzal a jelentéssel), a fülek helyett pedig az ikondokk.
 
@@ -237,7 +237,7 @@ A műszerfal (Dashboard) a következő beállításokat biztosítja:
 *   **Max Hálózati Import (W)** - Hálózati türelem-határ. Ha efelett húzunk a hálózatról, leáll a töltés.
 *   **Hálózati Import Időkorlát (Perc)** - Mennyi ideig tolerálja a rendszer a fenti hálózati import túllépést, mielőtt leállítaná a töltést (pl. 5 perc, hogy a felhőátvonulásokat átvészelje).
 *   **Üzemmód Megjegyzése Újraindításkor** - Kapcsoló, amivel a vezérlő emlékszik a legutóbb használt módra (Auto/Schedule/Force).
-*   **Klímavezérlés és Árnyékolás:** a klímák beállításai (11. fejezet), az árnyékolás időzítői (12. fejezet) és a felületen megtanított infravörös/rádiós kódok is a `config.json`-ba mentődnek (`"climate"` és `"shading"` blokk), így áramszünet vagy újraindítás után visszatöltődnek. Az eszközök **IP-címét és a légtisztító kulcsát (token) viszont csak a `config.json`-ban lehet megadni**, a felületen nem — mintája a `config_example.json`-ban található.
+*   **Klímavezérlés, Árnyékolás és az app eszközei:** a klímák beállításai (11. fejezet), az árnyékolás időzítői (12. fejezet), a konnektor és az internet-rádió időzítője (14. fejezet) és a felületen megtanított infravörös/rádiós kódok is a `config.json`-ba mentődnek (`"climate"`, `"shading"` és `"home_devices"` blokk), így áramszünet vagy újraindítás után visszatöltődnek. Az eszközök **IP-címét és a légtisztító kulcsát (token) viszont csak a `config.json`-ban lehet megadni**, a felületen nem — mintája a `config_example.json`-ban található.
 *   *Rejtett haladó beállítás (csak a `config.json`-ban módosítható)*: `"pbkdf2_iterations"` - A jelszó titkosítás erőssége (alapértelmezett: 100000). Gyengébb mikroszámítógépeken (pl. Raspberry Pi Zero) érdemes lehet csökkenteni (pl. 50000-re) a gyorsabb bejelentkezés érdekében. Ez az érték szabadon módosítható: a webes felület és az `AndroidWidget` mappában található widget is dinamikusan lekérdezi az aktuális beállítást a szervertől bejelentkezéskor, nem kell hozzájuk illeszteni a kliens oldalt.
 
 ---
@@ -280,7 +280,7 @@ A widget a szerverrel megegyező, titkosított kapcsolaton keresztül másodperc
 
 ### Működés
 
-*   A widget **csak akkor frissül, ha a telefon WiFi-n van** és a szerver elérhető. Idegen hálózaton vagy mobiladaton üresen (átlátszón) marad, majd hazatérve automatikusan újra megjelennek az adatok.
+*   A widget **Wi-Fin, vagy Wi-Fi nélkül aktív VPN-en (pl. Tailscale) keresztül frissül**, ha a szerver elérhető. Wi-Fin kb. 5 másodpercenként, Wi-Fi nélkül VPN-en át (mobilneten) a mobiladat kímélése miatt 30 másodpercenként. Mobiladaton VPN nélkül üresen (átlátszón) marad. Otthonon kívüli eléréshez a widget beállításában a szerver címe helyett a NAS VPN-es (pl. Tailscale 100.x.y.z) címét kell megadni; hazatérve (Wi-Fin) azonnal visszaáll az 5 másodperces ütem.
 *   A frissítés a képernyő bekapcsolt állapotában, kb. 5 másodpercenként történik (lezárt telefonon energiatakarékosságból szünetel).
 *   A widgetre **koppintva** azonnali kézi frissítés kényszeríthető.
 *   A widget ellenálló a **WiFi-hálózatok közötti váltásra**: ha elhagyod a saját hálózatod hatósugarát, majd visszatérsz, az adatok néhány másodpercen belül maguktól helyreállnak.
@@ -367,6 +367,49 @@ Az **Árnyékolás** fülön egy rádiós távirányítós **redőny** és **nap
 ## 13. Bojler
 
 A **Bojler** fül és a fejléc Bojler jelvénye jelenleg csak helyőrző: a vezérlése később készül el. Addig a jelvény szürke, az oldalon csak egy „Később.” feliratú kártya és (asztali nézetben) a Napló látszik.
+
+---
+
+## 14. Otthonvezérlő app (Android), LED-szalag, konnektor és internet-rádió
+
+Az Android widget alkalmazása (ugyanaz az APK) egy **„Otthonvezérlő” indítóikont** is kap: egy egyszerűsített, a Xiaomi Home-ra hasonlító alkalmazást az alapfunkciókhoz. A részletes beállítások maradnak a webes felületen. Otthonon kívül a Tailscale-lel működik (lásd a távoli elérésnél), mobilneten is.
+
+### Első indítás
+Az app a szerver címét és a jelszót kéri — ugyanaz a tárolt beállítás, mint a widgeté (bármelyikben módosítod, mindkettő azt használja). Címnek otthon a NAS helyi IP-je, otthonon kívüli használathoz a NAS Tailscale-címe (100.x.y.z) adható meg. A beállítás később a főképernyő fogaskerék-ikonjával érhető el.
+
+### Főképernyő
+*   **Energia-csempék** kis ikonokkal: napelem, hálózat, akku, ház — ugyanazzal a színkóddal, mint a webes Mérések kártyán (hálózat zöld = visszatáplálás, piros = vételezés; akku zöld = töltődik, piros = merül).
+*   **Autótöltő:** a mód, töltés közben az aktuális teljesítmény **pirossal**; **Indítás** (= a webes „Kézi indítás”) és **Leállítás** (= a webes „Ideiglenes leállítás”, soft stop). Ha a Solar Auto vagy az Ütemezett automatizmus be van kapcsolva, **az egész csempe lüktet**.
+*   **Klímák:** hőmérséklet és páratartalom (a légtisztítóé), „Utoljára: …” (az utoljára küldött parancs és ideje — az infra egyirányú, a klíma valódi állapotát a program nem tudja), **Fűtés BE / Hűtés BE / KI** gombok. Ha a klíma-automata be van kapcsolva, a csempék lüktetnek.
+*   **Redőny, napellenző:** Fel/Le (Be/Ki) gombok; a nyíl (›) a heti időzítőt nyitja (ugyanaz az időzítő, mint a webes Árnyékolás oldalon).
+*   **LED-szalag, konnektor:** koppintás a csempére = be/ki; a nyíl (›) a részleteket nyitja (LED: fényerő, szín; konnektor: napi időzítő).
+*   **Internet-rádió:** „Utoljára: power …” (az utoljára küldött gombnyomás ideje) és az időzítő állapota; a csempére koppintás és a **„Be/Ki (power)”** gomb is egy power gombnyomást küld; a nyíl (›) a napi időzítőt nyitja.
+*   Amíg az app előtérben van, 2 másodpercenként frissül (mint a webes felület); háttérben nem kérdez.
+*   A megjelenés a telefon beállítását követi: világos vagy **sötét mód**.
+
+### LED-szalag (CozyLife)
+*   **Helyben, felhő nélkül** vezérelhető (a szalag a 5555-ös TCP-porton fogad parancsokat). **Kulcs vagy jelszó nincs**, a helyi hálózaton bárki kapcsolhatja.
+*   Adj neki fix IP-t a routerben, és írd a `config.json`-ba (lásd lent). A CozyLife alkalmazás ezután nem kell hozzá.
+
+### Xiaomi okos konnektor
+*   Helyben, a légtisztítóéval azonos protokollon (miIO) vezérelhető. Kell hozzá a **kulcsa (token)** és a **típusazonosítója** (pl. `chuangmi.plug.hmi206`) — mindkettőt ugyanaz a „Xiaomi Cloud Tokens Extractor” írja ki, mint a légtisztítónál. Fix IP a routerben.
+*   **Napi időzítő:** a hét minden napjára egy Be és egy Ki időpont (üres = aznap nincs kapcsolás), „Időzítő aktív” kapcsolóval. A program a megadott percben **egyszer** kapcsol; ha abban a percben nem fut, a kapcsolás kimarad (nincs pótlás). A beállítás a `config.json`-ba mentődik.
+
+### Internet-rádió (infra, BroadLink)
+*   A rádió infravörös távirányítóját egy meglévő BroadLink adó utánozza (pl. a nappali klímáé). A távirányítón **egyetlen power gomb** van, ezért **egy kódot** kell megtanítani: a „Be” és a „Ki” is ugyanazt a gombnyomást küldi, a rádió az ellenkező állapotába vált. Az infra egyirányú, a rádió valódi állapotát a program nem tudja — ha épp nem abban az állapotban van, amire számítasz, a gombnyomás az ellenkezőjére kapcsolja.
+*   **Tanítás és próba a webes felületen**, az **Egyéb** fülön (csak asztali nézetben): **„Tanítás (power)”**, majd 30 másodpercen belül nyomd meg a távirányító power gombját a BroadLink felé fordítva; a **„Próba (power)”** gombbal kipróbálható. A kártyán látszik, hogy a kód megvan-e, és mikor ment ki utoljára gombnyomás.
+*   **Napi időzítő** a webes Egyéb fülön és az appban is (ugyanaz az időzítő): a hét minden napjára egy Be és egy Ki időpont (üres = aznap nincs kapcsolás), „Időzítő aktív” kapcsolóval. Mindkét időpontban a power gombnyomás megy ki, a megadott percben **egyszer** (nincs pótlás).
+*   Ha ugyanazt a BroadLinket egy klíma is használja, és pont egyszerre megy ki egy klíma- és egy rádióparancs, az egyik ritkán hibát adhat; a felület ezt kiírja, és újra lehet próbálni.
+
+### `config.json`
+```json
+"home_devices": {
+    "led":   {"name": "LED-szalag", "ip": "192.168.0.60"},
+    "plug":  {"name": "Konnektor", "ip": "192.168.0.61", "token": "<32 karakteres kulcs>", "model": "<típusazonosító>"},
+    "radio": {"name": "Internet-rádió", "broadlink_ip": "192.168.0.62"}
+}
+```
+(A számok csak minták. Az időzítőket és a rádió megtanított kódját a program tölti ki.) A program **percenként** lekérdezi a LED-szalag és a konnektor állapotát a helyi hálózaton, és parancs után azonnal is, így az app akkor is friss állapotot mutat, ha a fali gombbal vagy máshonnan kapcsoltad őket. Ez a két eszköz a webes felületen nem jelenik meg, csak az appban; a rádió a webes Egyéb fülön is.
 
 ---
 

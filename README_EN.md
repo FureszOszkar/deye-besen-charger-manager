@@ -145,7 +145,7 @@ Next to the title ("Otthonvezérlő", subtitle: "Helyi autótöltés és klíma 
 *   **Connections (Kapcsolatok):** Inverter, Töltő (charger), Hőmérő (thermometer), Klíma1, Klíma2, Klíma3. **Green** = the connection is alive, **red** = not reachable, **grey** = not configured (the device IP address is not set in `config.json`). The air conditioner badges show the reachability of their BroadLink transmitter.
 *   **Automations (Automatizmusok):** Auto solar, Auto ütemezett (scheduled), Klíma, Bojler, Árnyékolás (shading). A badge **lights up (cyan)** when that automation is enabled, and is grey when it is not. The Klíma badge lights up when "Automata bekapcsolva" (automation enabled) is saved in the air conditioner control; the Árnyékolás badge when at least one timer is active. The Bojler badge is always grey for now (comes later).
 
-Below them are the **tabs**: Autótöltő (car charger), Klímavezérlés (air conditioner control), Bojler (boiler), Árnyékolás (shading). Each tab is a completely separate page; in desktop view the Log appears at the bottom of every page (on mobile it has its own icon). On the Klímavezérlés tab the Measurements card is shown without the car charger part, with the "Hőmérő és klímák" (thermometer and air conditioners) rows.
+Below them are the **tabs**: Autótöltő (car charger), Klímavezérlés (air conditioner control), Bojler (boiler), Árnyékolás (shading), Egyéb (other). The **Egyéb** tab is only available in desktop view (it has no icon on mobile); it holds devices that fit nowhere else — currently the internet radio (Section 14). Each tab is a completely separate page; in desktop view the Log appears at the bottom of every page (on mobile it has its own icon). On the Klímavezérlés tab the Measurements card is shown without the car charger part, with the "Hőmérő és klímák" (thermometer and air conditioners) rows.
 
 On mobile, instead of the badges, two short status rows are shown ("Kapcs.:" and "Auto.:" rows with coloured dots, same meaning), and the icon dock replaces the tabs.
 
@@ -237,7 +237,7 @@ The dashboard provides the following settings:
 *   **Max Grid Import (W)** - Grid tolerance threshold. If exceeded, charging stops.
 *   **Grid Import Time Limit (Minutes)** - How long the system tolerates the above grid import excess before stopping charging (e.g., 5 minutes, to ride out passing clouds).
 *   **Remember Mode on Restart** - A toggle that makes the controller remember the last-used mode (Auto/Schedule/Force).
-*   **Air conditioner control and Shading:** the air conditioner settings (Section 11), the shading timers (Section 12) and the infrared/radio codes learned on the dashboard are also saved to `config.json` (`"climate"` and `"shading"` blocks), so they are reloaded after a power outage or restart. The device **IP addresses and the air purifier key (token), however, can only be set in `config.json`**, not on the dashboard — see `config_example.json` for the template.
+*   **Air conditioner control, Shading and the app's devices:** the air conditioner settings (Section 11), the shading timers (Section 12), the plug and internet radio timers (Section 14) and the infrared/radio codes learned on the dashboard are also saved to `config.json` (`"climate"`, `"shading"` and `"home_devices"` blocks), so they are reloaded after a power outage or restart. The device **IP addresses and the air purifier key (token), however, can only be set in `config.json`**, not on the dashboard — see `config_example.json` for the template.
 *   *Hidden advanced setting (only changeable in `config.json`)*: `"pbkdf2_iterations"` - The strength of the password encryption (default: 100000). On weaker microcomputers (like a Raspberry Pi Zero), you might want to decrease this (e.g., to 50000) for faster logins. This value is safe to change: the web dashboard and the widget in the `AndroidWidget` folder both fetch the current setting dynamically from the server at login time, so no client-side value needs to match it.
 
 ---
@@ -280,7 +280,7 @@ Over the same encrypted connection the server uses, the widget displays values t
 
 ### Behavior
 
-*   The widget **only refreshes while the phone is on Wi-Fi** and the server is reachable. On a foreign network or mobile data it stays blank (transparent), then restores the data automatically once you return home.
+*   The widget **refreshes on Wi-Fi, or without Wi-Fi through an active VPN (e.g. Tailscale)**, while the server is reachable. On Wi-Fi roughly every 5 seconds; without Wi-Fi through a VPN (mobile data) every 30 seconds to save mobile data. On mobile data without a VPN it stays blank (transparent). For access away from home, enter the NAS's VPN address (e.g. Tailscale 100.x.y.z) as the server address in the widget settings; back on Wi-Fi the 5-second rhythm resumes immediately.
 *   Refreshes happen while the screen is on, roughly every 5 seconds (paused on a locked phone to save battery).
 *   **Tapping** the widget forces an immediate manual refresh.
 *   The widget is resilient to **switching between Wi-Fi networks**: if you leave your own network's range and later return, the data recovers on its own within a few seconds.
@@ -367,6 +367,49 @@ On the **Árnyékolás** tab a radio remote-controlled **roller shutter** (redő
 ## 13. Boiler (Bojler)
 
 The **Bojler** tab and the header Bojler badge are currently only placeholders: its control will be built later. Until then the badge is grey, and the page shows only a card saying "Később." (later) and (in desktop view) the Log.
+
+---
+
+## 14. Otthonvezérlő App (Android), LED Strip, Smart Plug and Internet Radio
+
+The Android widget's application (the same APK) also gets an **"Otthonvezérlő" launcher icon**: a simplified app, similar to Xiaomi Home, for the basic functions. Detailed settings stay on the web dashboard. Away from home it works through Tailscale (see remote access), on mobile data too.
+
+### First start
+The app asks for the server address and the password — the same stored setting as the widget's (changing it in either place applies to both). At home the NAS's local IP can be used; for use away from home, the NAS's Tailscale address (100.x.y.z). The setting is available later via the gear icon on the main screen.
+
+### Main screen
+*   **Energy tiles** with small icons: solar, grid, battery, house — with the same colour code as the web Measurements card (grid green = export, red = import; battery green = charging, red = discharging).
+*   **Car charger:** the mode, and while charging the current power **in red**; **Indítás** (start = the web "Kézi indítás") and **Leállítás** (stop = the web "Ideiglenes leállítás", soft stop). If the Solar Auto or Scheduled automation is enabled, **the whole tile pulses**.
+*   **Air conditioners:** temperature and humidity (from the air purifier), "Utoljára: …" (the last command sent and its time — IR is one-way, the program does not know the real state of the air conditioner), **Fűtés BE / Hűtés BE / KI** (heating ON / cooling ON / OFF) buttons. If the climate automation is enabled, the tiles pulse.
+*   **Roller shutter, awning:** up/down buttons; the arrow (›) opens the weekly timer (the same timer as on the web Árnyékolás page).
+*   **LED strip, plug:** tapping the tile = on/off; the arrow (›) opens the details (LED: brightness, colour; plug: daily timer).
+*   **Internet radio:** "Utoljára: power …" (the time of the last button press sent) and the timer state; tapping the tile and the **"Be/Ki (power)"** button both send one power button press; the arrow (›) opens the daily timer.
+*   While the app is in the foreground it refreshes every 2 seconds (like the web dashboard); in the background it does not query.
+*   The appearance follows the phone's setting: light or **dark mode**.
+
+### LED strip (CozyLife)
+*   Controlled **locally, without the cloud** (the strip accepts commands on TCP port 5555). **There is no key or password**; anyone on the local network can switch it.
+*   Give it a fixed IP in the router and enter it in `config.json` (see below). The CozyLife app is not needed for it afterwards.
+
+### Xiaomi smart plug
+*   Controlled locally, with the same protocol as the air purifier (miIO). Its **key (token)** and **model identifier** (e.g. `chuangmi.plug.hmi206`) are needed — both are printed by the same "Xiaomi Cloud Tokens Extractor" as for the air purifier. Fixed IP in the router.
+*   **Daily timer:** an on and an off time for every day of the week (empty = no switching that day), with a "Időzítő aktív" (timer active) switch. The program switches **once** in the given minute; if it is not running in that minute, the switching is skipped (no catch-up). The setting is saved to `config.json`.
+
+### Internet radio (infrared, BroadLink)
+*   The radio's infrared remote is imitated by an existing BroadLink transmitter (e.g. the living-room air conditioner's). The remote has **a single power button**, so **one code** has to be learned: "Be" (on) and "Ki" (off) both send the same button press, and the radio switches to its opposite state. IR is one-way, the program does not know the real state of the radio — if it is not in the state you expect, the button press switches it the other way.
+*   **Learning and testing on the web dashboard**, on the **Egyéb** tab (desktop view only): **"Tanítás (power)"** (learn), then within 30 seconds press the remote's power button pointed at the BroadLink; the **"Próba (power)"** (test) button tries it. The card shows whether the code is learned and when the last button press was sent.
+*   **Daily timer** on the web Egyéb tab and in the app too (the same timer): an on and an off time for every day of the week (empty = no switching that day), with a "Időzítő aktív" (timer active) switch. At both times the power button press is sent, **once** in the given minute (no catch-up).
+*   If the same BroadLink is also used by an air conditioner and an air conditioner command and a radio command go out at exactly the same time, one of them may occasionally fail; the dashboard shows this and it can be retried.
+
+### `config.json`
+```json
+"home_devices": {
+    "led":   {"name": "LED-szalag", "ip": "192.168.0.60"},
+    "plug":  {"name": "Konnektor", "ip": "192.168.0.61", "token": "<32-character key>", "model": "<model identifier>"},
+    "radio": {"name": "Internet-rádió", "broadlink_ip": "192.168.0.62"}
+}
+```
+(The numbers are only samples. The timers and the radio's learned code are filled in by the program.) The program queries the state of the LED strip and the plug on the local network **every minute**, and right after a command, so the app shows a fresh state even if you switched them with the wall button or elsewhere. These two devices do not appear on the web dashboard, only in the app; the radio is also on the web Egyéb tab.
 
 ---
 
