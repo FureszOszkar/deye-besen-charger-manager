@@ -73,6 +73,19 @@ DEFAULT_CONFIG["shading"] = {
     }
 }
 
+# Otthoni eszközök (a natív apphoz): CozyLife LED-szalag, Xiaomi okos konnektor és internet-rádió
+# (infra, egy BroadLinken át, egyetlen „power” kóddal). Az IP-címek, a konnektor kulcsa (token) és
+# típusazonosítója (model) csak itt állíthatók; a napi időzítők az appból / a felületről, a rádió
+# megtanított kódja a felületről mentődik ide.
+HOME_DEVICES = ("led", "plug", "radio")
+DEFAULT_CONFIG["home_devices"] = {
+    "led": {"name": "LED-szalag", "ip": ""},
+    "plug": {"name": "Konnektor", "ip": "", "token": "", "model": "", "enabled": False,
+             "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS]},
+    "radio": {"name": "Internet-rádió", "broadlink_ip": "", "ir_power": "", "enabled": False,
+              "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS]},
+}
+
 # Inverter IP és port beállítások
 INVERTER_IP = "192.168.0.100"
 INVERTER_PORT = 8899
@@ -100,7 +113,7 @@ DEFAULT_PACKET_PASSWORD = bytearray([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 # --- SHARED STATE (globális állapot) ---
 shared_state = {
     # Watchdog PONG jelek
-    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time(), "climate": time.time(), "shading": time.time()},
+    "task_pong": {"inverter": time.time(), "ble": time.time(), "controller": time.time(), "simulation": time.time(), "web": time.time(), "climate": time.time(), "shading": time.time(), "home": time.time()},
 
     # Kapcsolatok állapota
     "inverter_connected": False,
@@ -180,7 +193,8 @@ shared_state = {
         "units": [
             {"name": "", "broadlink_ip": "", "has_on_heat": False, "has_on_cool": False, "has_off": False,
              "reachable": None, "busy": "",
-             "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
+             "last_result": "", "last_result_ok": None, "last_result_time": 0.0,
+             "last_sent": None}   # {"code": "heat_on"|"cool_on"|"off", "time": ...} — az app „Utoljára: …” sorához
             for _ in range(CLIMATE_UNIT_COUNT)
         ]
     },
@@ -194,6 +208,24 @@ shared_state = {
                   "last_result": "", "last_result_ok": None, "last_result_time": 0.0}
             for dev in SHADING_DEVICES
         }
+    },
+
+    # Otthoni eszközök nyilvános állapota (a konnektor kulcsa nélkül). A mért értékek a
+    # percenkénti lekérdezésből jönnek; None = még nincs adat / nincs beállítva.
+    "home": {
+        "led": {"name": "LED-szalag", "configured": False, "reachable": None, "on": None,
+                "brightness": None, "hue": None, "saturation": None, "error": "", "updated": 0.0},
+        "plug": {"name": "Konnektor", "configured": False, "reachable": None, "on": None,
+                 "enabled": False, "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS],
+                 "error": "", "updated": 0.0,
+                 "last_result": "", "last_result_ok": None, "last_result_time": 0.0},
+        # Internet-rádió: a megtanított kód nélkül, csak hogy megvan-e. Az infra egyirányú, a rádió
+        # valódi állapota nem ismert; a last_sent az utolsó elküldött power gombnyomás ideje.
+        "radio": {"name": "Internet-rádió", "configured": False, "broadlink_ip": "", "has_code": False,
+                  "busy": "", "enabled": False,
+                  "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS],
+                  "last_sent": None,
+                  "last_result": "", "last_result_ok": None, "last_result_time": 0.0},
     }
 }
 
@@ -280,6 +312,62 @@ def normalize_shading_config(raw):
     return result
 
 
+# Az otthoni eszközök teljes (a konnektor kulcsát is tartalmazó) konfigurációja; a state_lock védi.
+HOME_CONFIG = json.loads(json.dumps(DEFAULT_CONFIG["home_devices"]))
+
+
+def normalize_home_config(raw):
+    """A config.json "home_devices" blokkjának egységesítése; hibás/hiányzó részek helyett az
+    alapértékek (üres IP, kikapcsolt időzítő, üres időpont)."""
+    result = json.loads(json.dumps(DEFAULT_CONFIG["home_devices"]))
+    if not isinstance(raw, dict):
+        return result
+    led = raw.get("led")
+    if isinstance(led, dict):
+        for key in ("name", "ip"):
+            if isinstance(led.get(key), str) and (key != "name" or led[key].strip()):
+                result["led"][key] = led[key].strip()
+    for name, keys in (("plug", ("name", "ip", "token", "model")),
+                       ("radio", ("name", "broadlink_ip", "ir_power"))):
+        src = raw.get(name)
+        if not isinstance(src, dict):
+            continue
+        dst = result[name]
+        for key in keys:
+            if isinstance(src.get(key), str) and (key != "name" or src[key].strip()):
+                dst[key] = src[key].strip()
+        dst["enabled"] = bool(src.get("enabled", False))
+        sched = src.get("schedule")
+        if isinstance(sched, list):
+            for i, day in enumerate(sched[:len(WEEK_DAYS)]):
+                if isinstance(day, dict):
+                    for key in ("on", "off"):
+                        if isinstance(day.get(key), str):
+                            dst["schedule"][i][key] = day[key].strip()
+    return result
+
+
+def refresh_home_public_state():
+    """A shared_state["home"] beállítás-eredetű mezőinek frissítése a HOME_CONFIG-ból (a mért
+    értékek megmaradnak). A hívó tartsa a state_lock-ot."""
+    pub = shared_state["home"]
+    sim = bool(shared_state.get("simulation"))   # szimulációban beállítás nélkül is „beállított”
+    pub["led"]["name"] = HOME_CONFIG["led"]["name"]
+    pub["led"]["configured"] = bool(HOME_CONFIG["led"]["ip"]) or sim
+    plug = HOME_CONFIG["plug"]
+    pub["plug"]["name"] = plug["name"]
+    pub["plug"]["configured"] = bool(plug["ip"] and plug["token"]) or sim
+    pub["plug"]["enabled"] = plug["enabled"]
+    pub["plug"]["schedule"] = json.loads(json.dumps(plug["schedule"]))
+    radio = HOME_CONFIG["radio"]
+    pub["radio"]["name"] = radio["name"]
+    pub["radio"]["configured"] = bool(radio["broadlink_ip"]) or sim
+    pub["radio"]["broadlink_ip"] = radio["broadlink_ip"]
+    pub["radio"]["has_code"] = bool(radio["ir_power"])
+    pub["radio"]["enabled"] = radio["enabled"]
+    pub["radio"]["schedule"] = json.loads(json.dumps(radio["schedule"]))
+
+
 def refresh_shading_public_state():
     """A shared_state["shading"] frissítése a SHADING_CONFIG-ból (a futás közbeni mezők megmaradnak).
     A hívó tartsa a state_lock-ot."""
@@ -314,7 +402,7 @@ def refresh_climate_public_state():
 def load_config():
     global shared_state, CHARGER_NAME, CHARGER_MAC, charger_password
     global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
-    global _last_initiated_session_id, CLIMATE_CONFIG, SHADING_CONFIG
+    global _last_initiated_session_id, CLIMATE_CONFIG, SHADING_CONFIG, HOME_CONFIG
     config = DEFAULT_CONFIG.copy()
     
     if os.path.exists(CONFIG_FILE):
@@ -411,6 +499,10 @@ def load_config():
         SHADING_CONFIG = normalize_shading_config(config.get("shading"))
         refresh_shading_public_state()
 
+        # Otthoni eszközök (LED-szalag, konnektor)
+        HOME_CONFIG = normalize_home_config(config.get("home_devices"))
+        refresh_home_public_state()
+
     # Töltő BLE paraméterek betöltése
     CHARGER_NAME = config.get("charger_name", "ACP#DefaultName")
     CHARGER_MAC = config.get("charger_mac", "00:11:22:33:44:55")
@@ -492,7 +584,8 @@ def save_config_file():
             "session_last_time": shared_state.get("session_last_time", 0.0),
             "session_last_power": shared_state.get("session_last_power", 0.0),
             "climate": json.loads(json.dumps(CLIMATE_CONFIG)),
-            "shading": json.loads(json.dumps(SHADING_CONFIG))
+            "shading": json.loads(json.dumps(SHADING_CONFIG)),
+            "home_devices": json.loads(json.dumps(HOME_CONFIG))
         }
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

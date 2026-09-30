@@ -267,6 +267,8 @@ def send_code(unit, which):
             dev.broadlink_send(ip, code)
         msg = f"Elküldve: {_CODE_LABELS[which]} parancs."
         _set_unit_result(unit, True, msg)
+        with state_lock:   # az app „Utoljára: …” sorához (az infra egyirányú, ez csak a küldött parancs)
+            shared_state["climate"]["units"][unit]["last_sent"] = {"code": which, "time": time.time()}
         log_message(f"[KLÍMA] {label}: kézi {_CODE_LABELS[which]} parancs elküldve"
                     f"{' (szimuláció)' if sim else ''}.")
         return True, msg

@@ -199,44 +199,46 @@ def miio_build_packet(token, device_id, stamp, payload):
     return header + checksum + body
 
 
-def miio_parse_packet(token, packet):
-    """Válaszcsomag ellenőrzése (MD5) és visszafejtése; a visszafejtett JSON-t adja vissza."""
+def miio_parse_packet(token, packet, label="A légtisztító"):
+    """Válaszcsomag ellenőrzése (MD5) és visszafejtése; a visszafejtett JSON-t adja vissza.
+    A label az eszköz megnevezése a hibaüzenetekben (pl. "A konnektor")."""
     if len(packet) < 32 or packet[:2] != b"\x21\x31":
-        raise ClimateDeviceError("Érvénytelen válasz a légtisztítótól.")
+        raise ClimateDeviceError(f"Érvénytelen válasz: {label.lower()} ismeretlen formátumban felelt.")
     length = struct.unpack(">H", packet[2:4])[0]
     body = packet[32:length]
     if _md5(packet[:16] + token + body) != packet[16:32]:
-        raise ClimateDeviceError("A légtisztító válaszának ellenőrzőösszege hibás (rossz token?).")
+        raise ClimateDeviceError(f"{label} válaszának ellenőrzőösszege hibás (rossz token?).")
     if not body:
-        raise ClimateDeviceError("Üres válasz a légtisztítótól.")
+        raise ClimateDeviceError(f"{label} üres választ küldött.")
     plain = miio_decrypt(token, body).rstrip(b"\x00")
     return json.loads(plain.decode("utf-8"))
 
 
-def _parse_token(token_hex):
+def _parse_token(token_hex, label="A légtisztító"):
     try:
         token = bytes.fromhex(token_hex)
     except (ValueError, TypeError) as e:
-        raise ClimateDeviceError("A légtisztító tokenje nem érvényes (32 hexadecimális karakter kell).") from e
+        raise ClimateDeviceError(f"{label} tokenje nem érvényes (32 hexadecimális karakter kell).") from e
     if len(token) != 16:
-        raise ClimateDeviceError("A légtisztító tokenje nem érvényes (32 hexadecimális karakter kell).")
+        raise ClimateDeviceError(f"{label} tokenje nem érvényes (32 hexadecimális karakter kell).")
     return token
 
 
-def miio_call(ip, token_hex, method, params, timeout=MIIO_TIMEOUT_S):
-    """Egy miIO parancs (kézfogás + kérés + válasz) egyetlen, lezárt UDP-sockettel."""
-    token = _parse_token(token_hex)
+def miio_call(ip, token_hex, method, params, timeout=MIIO_TIMEOUT_S, label="A légtisztító"):
+    """Egy miIO parancs (kézfogás + kérés + válasz) egyetlen, lezárt UDP-sockettel.
+    A label az eszköz megnevezése a hibaüzenetekben (alapból a légtisztító)."""
+    token = _parse_token(token_hex, label)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.settimeout(timeout)
         try:
             sock.sendto(_MIIO_HELLO, (ip, MIIO_PORT))
             hello, _ = sock.recvfrom(1024)
         except socket.timeout as e:
-            raise ClimateDeviceError(f"A légtisztító ({ip}) nem válaszol.") from e
+            raise ClimateDeviceError(f"{label} ({ip}) nem válaszol.") from e
         except OSError as e:
-            raise ClimateDeviceError(f"A légtisztító ({ip}) nem érhető el: {e}") from e
+            raise ClimateDeviceError(f"{label} ({ip}) nem érhető el: {e}") from e
         if len(hello) < 32 or hello[:2] != b"\x21\x31":
-            raise ClimateDeviceError("Érvénytelen kézfogás-válasz a légtisztítótól.")
+            raise ClimateDeviceError(f"Érvénytelen kézfogás-válasz: {label.lower()} ({ip}).")
         device_id = hello[8:12]
         stamp = struct.unpack(">I", hello[12:16])[0]
 
@@ -252,15 +254,15 @@ def miio_call(ip, token_hex, method, params, timeout=MIIO_TIMEOUT_S):
                     raise socket.timeout()
                 sock.settimeout(remaining)
                 raw, _ = sock.recvfrom(4096)
-                reply = miio_parse_packet(token, raw)
+                reply = miio_parse_packet(token, raw, label)
                 if reply.get("id") == msg_id:
                     break  # egy korábbi, késve érkező válasz esetén tovább várunk
         except socket.timeout as e:
-            raise ClimateDeviceError(f"A légtisztító ({ip}) nem válaszolt a kérésre (rossz token?).") from e
+            raise ClimateDeviceError(f"{label} ({ip}) nem válaszolt a kérésre (rossz token?).") from e
         except OSError as e:
-            raise ClimateDeviceError(f"A légtisztító ({ip}) nem érhető el: {e}") from e
+            raise ClimateDeviceError(f"{label} ({ip}) nem érhető el: {e}") from e
     if "error" in reply:
-        raise ClimateDeviceError(f"A légtisztító hibát jelzett: {reply['error']}")
+        raise ClimateDeviceError(f"{label} hibát jelzett: {reply['error']}")
     return reply.get("result")
 
 

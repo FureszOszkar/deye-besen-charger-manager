@@ -18,6 +18,7 @@ from config import (
 )
 import climate_logic
 import shading_logic
+import home_devices
 
 # --- ÜTEMEZÉS VALIDÁCIÓ ---
 FORCED_SCHEDULE_DAYS = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
@@ -1840,6 +1841,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <button type="button" class="page-tab" id="page-tab-climate" onclick="showPage('climate')">Klímavezérlés</button>
             <button type="button" class="page-tab" id="page-tab-boiler" onclick="showPage('boiler')">Bojler</button>
             <button type="button" class="page-tab" id="page-tab-shading" onclick="showPage('shading')">Árnyékolás</button>
+            <button type="button" class="page-tab" id="page-tab-other" onclick="showPage('other')">Egyéb</button>
         </div>
     </header>
 
@@ -2358,6 +2360,40 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="shading-broadlink" class="climate-status" style="margin-bottom:0.6rem;"></div>
                 <div id="shading-units"></div>
             </details>
+        </div>
+
+        <!-- EGYÉB — internet-rádió (infra, BroadLink, egyetlen power kód); csak asztali nézetben -->
+        <div class="card" id="other-radio-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem; min-height: auto;">
+            <div class="card-title" style="justify-content:flex-start; gap:0.4rem;">Internet-rádió <span id="radio_broadlink" class="climate-status" style="font-weight:400;"></span></div>
+            <div id="radio_status" class="climate-status"></div>
+            <div class="climate-btns">
+                <button type="button" class="action-btn action-btn-soft" style="flex:0 0 auto;" onclick="radioAction('/api/radio/learn')">Tanítás (power)</button>
+                <button type="button" class="action-btn action-btn-start" style="flex:0 0 auto;" onclick="radioAction('/api/radio/send')">Próba (power)</button>
+            </div>
+            <div class="climate-status">Tanítás: a gomb után 30 mp-en belül nyomd meg a távirányító power gombját a BroadLink felé fordítva.</div>
+        </div>
+
+        <div class="card shading-card" id="other-radio-timer-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                Időzítő
+                <label class="checkbox-group"><input type="checkbox" id="radio_enabled"> Időzítő aktív</label>
+            </div>
+            <div class="climate-status">A power gomb vált: a „Be” és a „Ki” időpontban is ugyanazt a gombnyomást küldi. Ha a rádió épp nem abban az állapotban van, az ellenkezőjére vált.</div>
+            <table class="shading-table" style="max-width: 32rem;">
+                <thead><tr><th></th><th>Be</th><th>Ki</th></tr></thead>
+                <tbody>
+                    <tr><td>Hétfő</td><td><input type="time" id="radio_on_0"></td><td><input type="time" id="radio_off_0"></td></tr>
+                    <tr><td>Kedd</td><td><input type="time" id="radio_on_1"></td><td><input type="time" id="radio_off_1"></td></tr>
+                    <tr><td>Szerda</td><td><input type="time" id="radio_on_2"></td><td><input type="time" id="radio_off_2"></td></tr>
+                    <tr><td>Csütörtök</td><td><input type="time" id="radio_on_3"></td><td><input type="time" id="radio_off_3"></td></tr>
+                    <tr><td>Péntek</td><td><input type="time" id="radio_on_4"></td><td><input type="time" id="radio_off_4"></td></tr>
+                    <tr><td>Szombat</td><td><input type="time" id="radio_on_5"></td><td><input type="time" id="radio_off_5"></td></tr>
+                    <tr><td>Vasárnap</td><td><input type="time" id="radio_on_6"></td><td><input type="time" id="radio_off_6"></td></tr>
+                </tbody>
+            </table>
+            <div>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveRadioSchedule()">Mentés</button>
+            </div>
         </div>
 
         <!-- SZIMULÁCIÓS ÉS TESZT PANEL -->
@@ -3183,6 +3219,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 if (data.climate) renderClimate(data.climate);
                 if (data.shading) renderShading(data.shading);
+                if (data.home && data.home.radio) renderRadio(data.home.radio, data.climate);
 
                 // Inverter kapcsolat
                 const inverterBadge = document.getElementById('badge-inverter');
@@ -3617,7 +3654,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         let activeTab = 'auto';
         let currentSection = 'auto';
-        let currentPage = 'charger';   // 'charger' / 'climate' / 'boiler' / 'shading'
+        let currentPage = 'charger';   // 'charger' / 'climate' / 'boiler' / 'shading' / 'other'
 
         function selectTab(tab) {
             activeTab = tab;
@@ -3634,8 +3671,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         // Rész -> oldal: a mobil dokk részei és a fejléc fülei ugyanazokat az oldalakat jelenítik meg
-        const PAGE_OF_SECTION = { climate: 'climate', boiler: 'boiler', shading: 'shading' };
-        const PAGES = ['charger', 'climate', 'boiler', 'shading'];
+        // Az „Egyéb” oldal csak asztali nézetben érhető el (a fülsor mobilon rejtett, a dokkban nincs ikonja)
+        const PAGE_OF_SECTION = { climate: 'climate', boiler: 'boiler', shading: 'shading', other: 'other' };
+        const PAGES = ['charger', 'climate', 'boiler', 'shading', 'other'];
 
         function showSection(section) {
             currentSection = section;
@@ -3647,12 +3685,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (t) t.classList.toggle('active', currentPage === p);
             });
 
-            // Ikondokk kijelölés frissítése
-            document.querySelectorAll('.dock-item').forEach(el => el.classList.remove('active'));
-            const activeDockItem = document.getElementById('dock-item-' + section);
-            if (activeDockItem) activeDockItem.classList.add('active');
-
             const isMobile = window.innerWidth <= 1024;
+
+            // Ikondokk kijelölés frissítése (mobilon az „Egyéb” helyett a Mérések látszik)
+            document.querySelectorAll('.dock-item').forEach(el => el.classList.remove('active'));
+            const activeDockItem = document.getElementById('dock-item-' + (isMobile && section === 'other' ? 'measurements' : section));
+            if (activeDockItem) activeDockItem.classList.add('active');
 
             const configCard = document.getElementById('config-card');
             const telemetryCard = document.getElementById('telemetry-card');
@@ -3662,16 +3700,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const boilerCard = document.getElementById('boiler-card');
             const shadingCards = ['shading-roller-card', 'shading-awning-card', 'shading-devices-card']
                 .map(id => document.getElementById(id));
+            const otherCards = ['other-radio-card', 'other-radio-timer-card'].map(id => document.getElementById(id));
             const show = (el, disp) => { if (el) el.style.display = disp; };
 
             // Mindent elrejtünk, majd az adott nézet kártyáit megjelenítjük
-            [configCard, telemetryCard, simCard, logCard, climateCard, boilerCard, ...shadingCards].forEach(el => show(el, 'none'));
+            [configCard, telemetryCard, simCard, logCard, climateCard, boilerCard, ...shadingCards, ...otherCards].forEach(el => show(el, 'none'));
 
             if (isMobile) {
                 if (section === 'auto' || section === 'schedule' || section === 'force') {
                     show(configCard, 'flex');
                     selectTab(section);
-                } else if (section === 'measurements') {
+                } else if (section === 'measurements' || section === 'other') {
+                    // Az „Egyéb” oldal mobilon nem érhető el: ha az ablakot így szűkítik, a Mérések látszik
                     show(telemetryCard, 'flex');
                 } else if (section === 'climate') {
                     // Klímavezérlés mobilon: a Mérések ablak (az autótöltő része nélkül) + a Klímavezérlés kártya
@@ -3695,6 +3735,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 } else if (currentPage === 'shading') {
                     // Asztali, Árnyékolás: bal a Redőny, jobb a Napellenző, alattuk az eszközök
                     shadingCards.forEach(el => show(el, 'flex'));
+                } else if (currentPage === 'other') {
+                    // Asztali, Egyéb: az internet-rádió, alatta az időzítője
+                    otherCards.forEach(el => show(el, 'flex'));
                 } else {
                     // Asztali, Autótöltő: a megszokott elrendezés
                     show(configCard, 'flex');
@@ -3724,7 +3767,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Fejléc fülei (asztali nézet): Autótöltő / Klímavezérlés / Bojler / Árnyékolás
+        // Fejléc fülei (asztali nézet): Autótöltő / Klímavezérlés / Bojler / Árnyékolás / Egyéb
         function showPage(page) {
             if (page !== 'charger') {
                 showSection(page);
@@ -4020,6 +4063,88 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
         function shadingLearn(dev, action) { shadingAction('/api/shading/learn', dev, action); }
         function shadingSend(dev, action) { shadingAction('/api/shading/send', dev, action); }
+
+        // === EGYÉB: internet-rádió (infra, BroadLink; egyetlen power kód) ===
+        let radioFormLoaded = false;
+
+        function renderRadio(r, climate) {
+            const bl = document.getElementById('radio_broadlink');
+            if (bl) {
+                // Ha ugyanazt a BroadLinket egy klíma is használja, annak a nevével (pl. „Nappali BroadLink”)
+                const unit = ((climate && climate.units) || []).find(u => u.broadlink_ip && u.broadlink_ip === r.broadlink_ip);
+                bl.textContent = r.broadlink_ip
+                    ? `— ${unit && unit.name ? unit.name + ' ' : ''}BroadLink (${r.broadlink_ip})`
+                    : '— a BroadLink IP-címe nincs megadva (config.json: home_devices.radio.broadlink_ip)';
+            }
+            const st = document.getElementById('radio_status');
+            if (st) {
+                const hm = t => new Date(t * 1000).toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' });
+                let html = `Power kód: ${r.has_code ? '✓ megtanítva' : '– nincs megtanítva'}`;
+                if (r.last_sent) html += ` · Utoljára: power ${hm(r.last_sent)}`;
+                if (r.busy === 'learn') {
+                    html += '<br><b>Tanítás folyamatban: nyomd meg a távirányító power gombját a BroadLink felé fordítva…</b>';
+                } else if (r.busy) {
+                    html += '<br><b>Küldés…</b>';
+                } else if (r.last_result) {
+                    const when = r.last_result_time ? new Date(r.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
+                    html += `<br><span style="color:${r.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(r.last_result)}</span> (${when})`;
+                }
+                st.innerHTML = html;
+            }
+            // Az időzítő-űrlapot csak egyszer töltjük ki (és mentés után), hogy a frissítés ne írja felül a gépelést
+            if (!radioFormLoaded) {
+                const en = document.getElementById('radio_enabled');
+                if (en) en.checked = !!r.enabled;
+                (r.schedule || []).forEach((day, i) => {
+                    const on = document.getElementById(`radio_on_${i}`);
+                    const off = document.getElementById(`radio_off_${i}`);
+                    if (on) on.value = day.on || '';
+                    if (off) off.value = day.off || '';
+                });
+                radioFormLoaded = true;
+            }
+        }
+
+        async function saveRadioSchedule() {
+            const schedule = [];
+            for (let i = 0; i < 7; i++) {
+                schedule.push({
+                    on: document.getElementById(`radio_on_${i}`).value,
+                    off: document.getElementById(`radio_off_${i}`).value
+                });
+            }
+            const body = { enabled: document.getElementById('radio_enabled').checked, schedule: schedule };
+            try {
+                const response = await fetch('/api/radio/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const res = await response.json();
+                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
+                if (res.status === 'success') {
+                    radioFormLoaded = false;
+                    updateStatus();
+                }
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        async function radioAction(url) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const res = await response.json();
+                if (res.status !== 'success' || url.endsWith('/learn')) alert(res.message);
+                updateStatus();
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
 
         // === KLÍMAVEZÉRLÉS ===
         const CLIMATE_UNIT_COUNT = 3;
@@ -4645,6 +4770,34 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_encrypted_json({"status": "error", "message": f"Hibás adatformátum: {e}"})
                 
+        elif self.path in ('/api/led/set', '/api/plug/set', '/api/plug/schedule'):
+            # Otthoni eszközök (a natív apphoz): LED-szalag beállítása, konnektor kapcsolása és időzítője
+            try:
+                data = self._read_encrypted_body()
+                if self.path == '/api/led/set':
+                    ok, msg = home_devices.led_set(data)
+                elif self.path == '/api/plug/set':
+                    ok, msg = home_devices.plug_set(data)
+                else:
+                    ok, msg = home_devices.update_plug_schedule(data)
+                self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
+            except Exception as e:
+                self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
+
+        elif self.path in ('/api/radio/learn', '/api/radio/send', '/api/radio/schedule'):
+            # Internet-rádió (infra, BroadLink): power kód tanítása, egy gombnyomás, napi időzítő
+            try:
+                data = self._read_encrypted_body()
+                if self.path == '/api/radio/learn':
+                    ok, msg = home_devices.radio_learn(data)
+                elif self.path == '/api/radio/send':
+                    ok, msg = home_devices.radio_send(data)
+                else:
+                    ok, msg = home_devices.update_radio_schedule(data)
+                self._send_encrypted_json({"status": "success" if ok else "error", "message": msg})
+            except Exception as e:
+                self._send_encrypted_json({"status": "error", "message": f"Hiba: {e}"})
+
         elif self.path in ('/api/shading/config', '/api/shading/learn', '/api/shading/send'):
             # Árnyékolás: időzítő mentése (config.json), RF-tanítás, kézi próba
             try:
