@@ -198,7 +198,8 @@ class PlugActivity : AppDetailActivity() {
         val (trow, tsw) = AppUi.switchRow(this, "Időzítő aktív") { }
         timer = tsw
         c2.addView(trow)
-        editor = ScheduleEditor(this, "on", "off", "Be", "Ki")
+        // Naponta két be-ki pár (pl. lámpa reggel és este)
+        editor = ScheduleEditor(this, listOf("on", "off", "on2", "off2"), listOf("1. Be", "1. Ki", "2. Be", "2. Ki"))
         c2.addView(editor.view)
         c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
             send("/api/plug/schedule", JSONObject().put("enabled", timer.isChecked).put("schedule", editor.toJson()))
@@ -242,7 +243,7 @@ class RadioActivity : AppDetailActivity() {
         timer = tsw
         c2.addView(trow)
         c2.addView(AppUi.text(this, "A power gomb vált (Be és Ki ugyanaz a gombnyomás).", 12f, R.color.o_muted))
-        editor = ScheduleEditor(this, "on", "off", "Be", "Ki")
+        editor = ScheduleEditor(this, listOf("on", "off"), listOf("Be", "Ki"))
         c2.addView(editor.view)
         c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
             send("/api/radio/schedule", JSONObject().put("enabled", timer.isChecked).put("schedule", editor.toJson()))
@@ -291,7 +292,7 @@ class ShadingActivity : AppDetailActivity() {
         val (trow, tsw) = AppUi.switchRow(this, "Időzítő aktív") { }
         timer = tsw
         c2.addView(trow)
-        editor = ScheduleEditor(this, "up", "down", up, down)
+        editor = ScheduleEditor(this, listOf("up", "down"), listOf(up, down))
         c2.addView(editor.view)
         c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
             send("/api/shading/config", JSONObject().put("device", device).put("enabled", timer.isChecked)

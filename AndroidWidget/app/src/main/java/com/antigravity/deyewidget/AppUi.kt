@@ -32,6 +32,7 @@ import java.util.Locale
 object AppUi {
     val HU: Locale = Locale("hu", "HU")
     val WEEK_DAYS = listOf("Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap")
+    val WEEK_DAYS_SHORT = listOf("H", "K", "Sze", "Cs", "P", "Szo", "V")
 
     fun dp(ctx: Context, v: Int): Int = (v * ctx.resources.displayMetrics.density).toInt()
     fun color(ctx: Context, id: Int): Int = ContextCompat.getColor(ctx, id)
@@ -172,22 +173,25 @@ object AppUi {
 }
 
 /**
- * Heti időzítő-szerkesztő (konnektor, rádió: be/ki; árnyékolás: fel/le). 7 nap × 2 időpont; az üres időpont
- * („–”) azt jelenti, hogy aznap nincs kapcsolás. Koppintásra időválasztó, „Törlés” gombbal ürít.
+ * Heti időzítő-szerkesztő (rádió: be/ki; árnyékolás: fel/le; konnektor: két be-ki pár). 7 nap × az oszlopok
+ * (keys, labels) időpontjai; az üres időpont („–”) azt jelenti, hogy aznap nincs kapcsolás. Két oszlopnál
+ * teljes, többnél rövid napnevek, hogy egy sor kiférjen. Koppintásra időválasztó, „Törlés” gombbal ürít.
  */
-class ScheduleEditor(private val ctx: Context, keyA: String, keyB: String, labelA: String, labelB: String) {
-    private val keys = listOf(keyA, keyB)
-    private val values = Array(7) { arrayOf("", "") }
-    private val cells = Array(7) { arrayOfNulls<TextView>(2) }
+class ScheduleEditor(private val ctx: Context, private val keys: List<String>, labels: List<String>) {
+    private val values = Array(7) { Array(keys.size) { "" } }
+    private val cells = Array(7) { arrayOfNulls<TextView>(keys.size) }
     val view: LinearLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
 
     init {
-        view.addView(AppUi.row(ctx, AppUi.text(ctx, "", 12f, R.color.o_muted),
-            AppUi.text(ctx, labelA, 12f, R.color.o_muted), AppUi.text(ctx, labelB, 12f, R.color.o_muted)))
+        val compact = keys.size > 2      // négy oszlop (konnektor): rövid napnevek, középre igazított feliratok
+        val head = listOf(AppUi.text(ctx, "", 12f, R.color.o_muted)) +
+            labels.map { AppUi.text(ctx, it, 12f, R.color.o_muted).apply { if (compact) gravity = Gravity.CENTER_HORIZONTAL } }
+        view.addView(AppUi.row(ctx, *head.toTypedArray()))
+        val dayNames = if (compact) AppUi.WEEK_DAYS_SHORT else AppUi.WEEK_DAYS
         for (d in 0 until 7) {
-            val day = AppUi.text(ctx, AppUi.WEEK_DAYS[d], 14f, R.color.o_text).apply { gravity = Gravity.CENTER_VERTICAL }
-            for (k in 0..1) cells[d][k] = AppUi.button(ctx, "–", R.color.o_card2, R.color.o_text) { pick(d, k) }
-            view.addView(AppUi.row(ctx, day, cells[d][0]!!, cells[d][1]!!))
+            val day = AppUi.text(ctx, dayNames[d], 14f, R.color.o_text).apply { gravity = Gravity.CENTER_VERTICAL }
+            for (k in keys.indices) cells[d][k] = AppUi.button(ctx, "–", R.color.o_card2, R.color.o_text) { pick(d, k) }
+            view.addView(AppUi.row(ctx, day, *cells[d].map { it!! }.toTypedArray()))
         }
     }
 
@@ -211,11 +215,11 @@ class ScheduleEditor(private val ctx: Context, keyA: String, keyB: String, label
         if (schedule == null) return
         for (d in 0 until minOf(7, schedule.length())) {
             val o = schedule.optJSONObject(d) ?: continue
-            for (k in 0..1) set(d, k, o.optString(keys[k], ""))
+            for (k in keys.indices) set(d, k, o.optString(keys[k], ""))
         }
     }
 
     fun toJson(): JSONArray = JSONArray().apply {
-        for (d in 0 until 7) put(JSONObject().apply { put(keys[0], values[d][0]); put(keys[1], values[d][1]) })
+        for (d in 0 until 7) put(JSONObject().apply { keys.forEachIndexed { k, key -> put(key, values[d][k]) } })
     }
 }

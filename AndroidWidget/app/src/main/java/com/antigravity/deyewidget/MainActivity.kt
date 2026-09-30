@@ -28,7 +28,8 @@ import java.util.Date
 /**
  * Az app főképernyője (a jóváhagyott vázlat szerint): felül energia-csempék, alatta eszközcsempék.
  * Klíma és autótöltő: a gombok a csempén, automata esetén az egész csempe lüktet.
- * Redőny, napellenző, LED, konnektor, internet-rádió: a nyíl (›) részletképernyőt nyit.
+ * Redőny, napellenző, LED, konnektor, internet-rádió: a csempére koppintás (vagy a nyíl ›) a részletképernyőt
+ * nyitja, kapcsolni csak a csempe gombjaival lehet.
  * Amíg a képernyő előtérben van, 2 mp-enként frissít (mint a webes felület), háttérben nem.
  */
 class MainActivity : Activity() {
@@ -152,6 +153,9 @@ class MainActivity : Activity() {
             val arrow = AppUi.icon(this, R.drawable.ic_app_chevron, R.color.o_muted, 22)
             arrow.setOnClickListener { onArrow?.invoke() }
             head.addView(arrow)
+            // A csempére bárhol koppintva is a részletek nyílnak (a kis nyilat nehéz eltalálni); a csempén
+            // lévő gombok a saját koppintásukat kapják. Kapcsolni csak a gombokkal lehet.
+            root.setOnClickListener { onArrow?.invoke() }
         }
         root.addView(head)
         val status = AppUi.text(this, "–", 12f, R.color.o_muted)
@@ -200,17 +204,20 @@ class MainActivity : Activity() {
             AppUi.button(this, "Ki", R.color.o_off_bg, R.color.o_text) { shading("awning", "down") })
         tiles.add(awning.root)
 
-        // LED-szalag és konnektor: koppintás = be/ki, nyíl = részletek
+        // LED-szalag és konnektor: Be / Ki gomb, a csempe (és a nyíl) a részleteket nyitja
         led = newTile("LED-szalag", R.drawable.ic_app_bulb, true) { startActivity(Intent(this, LedActivity::class.java)) }
-        led.root.setOnClickListener { toggleLed() }
+        twoButtons(led,
+            AppUi.button(this, "Be", R.color.o_off_bg, R.color.o_text) { ledSet(true) },
+            AppUi.button(this, "Ki", R.color.o_off_bg, R.color.o_text) { ledSet(false) })
         tiles.add(led.root)
         plug = newTile("Konnektor", R.drawable.ic_app_plug, true) { startActivity(Intent(this, PlugActivity::class.java)) }
-        plug.root.setOnClickListener { togglePlug() }
+        twoButtons(plug,
+            AppUi.button(this, "Be", R.color.o_off_bg, R.color.o_text) { plugSet(true) },
+            AppUi.button(this, "Ki", R.color.o_off_bg, R.color.o_text) { plugSet(false) })
         tiles.add(plug.root)
 
-        // Internet-rádió (infra, egyetlen power gomb): koppintás és a gomb = egy power gombnyomás, nyíl = időzítő
+        // Internet-rádió (infra, egyetlen power gomb): a gomb = egy power gombnyomás, a csempe (és a nyíl) = időzítő
         radio = newTile("Internet-rádió", R.drawable.ic_app_radio, true) { startActivity(Intent(this, RadioActivity::class.java)) }
-        radio.root.setOnClickListener { radioPress() }
         radio.root.addView(AppUi.row(this, AppUi.button(this, "Be/Ki (power)", R.color.o_off_bg, R.color.o_text) { radioPress() }))
         tiles.add(radio.root)
         content.addView(AppUi.twoColumns(this, tiles, fillHeight = true))
@@ -337,17 +344,10 @@ class MainActivity : Activity() {
     private fun openShading(device: String) =
         startActivity(Intent(this, ShadingActivity::class.java).putExtra("device", device))
 
-    private fun toggleLed() {
-        val l = last?.optJSONObject("home")?.optJSONObject("led") ?: return
-        if (!l.optBoolean("configured")) return
-        AppUi.action(this, scope, "/api/led/set", JSONObject().put("on", !l.optBoolean("on"))) { done() }
-    }
+    /** LED-szalag / konnektor kapcsolása a csempe Be / Ki gombjával (a szerver érthető hibát ad, ha nincs beállítva). */
+    private fun ledSet(on: Boolean) = AppUi.action(this, scope, "/api/led/set", JSONObject().put("on", on)) { done() }
 
-    private fun togglePlug() {
-        val p = last?.optJSONObject("home")?.optJSONObject("plug") ?: return
-        if (!p.optBoolean("configured")) return
-        AppUi.action(this, scope, "/api/plug/set", JSONObject().put("on", !p.optBoolean("on"))) { done() }
-    }
+    private fun plugSet(on: Boolean) = AppUi.action(this, scope, "/api/plug/set", JSONObject().put("on", on)) { done() }
 
     /** Egy power gombnyomás (a szerver érthető hibát ad, ha nincs beállítva vagy megtanítva). */
     private fun radioPress() = AppUi.action(this, scope, "/api/radio/send", JSONObject()) { done() }
