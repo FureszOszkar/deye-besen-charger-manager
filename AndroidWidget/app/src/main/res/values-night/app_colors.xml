@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Az app (Otthonvezérlő) színei — sötét mód (a telefon beállítását követi) -->
+<resources>
+    <color name="o_bg">#111318</color>
+    <color name="o_card">#1E2128</color>
+    <color name="o_card2">#2A2E37</color>
+    <color name="o_text">#E5E7EB</color>
+    <color name="o_muted">#9CA3AF</color>
+    <color name="o_accent">#38BDF8</color>
+    <color name="o_on_accent">#0B1220</color>
+    <color name="o_pulse">#163247</color>
+    <color name="o_tile_on">#0B3A55</color>
+    <color name="o_green">#4ADE80</color>
+    <color name="o_red">#F87171</color>
+    <color name="o_amber">#FBBF24</color>
+    <color name="o_heat_bg">#4C1D1D</color>
+    <color name="o_heat_fg">#FCA5A5</color>
+    <color name="o_cool_bg">#1E3A5F</color>
+    <color name="o_cool_fg">#93C5FD</color>
+    <color name="o_off_bg">#374151</color>
+    <color name="o_start_bg">#14532D</color>
+    <color name="o_start_fg">#86EFAC</color>
+    <color name="o_stop_bg">#4C1D1D</color>
+    <color name="o_stop_fg">#FCA5A5</color>
+    <bool name="o_light_status">false</bool>
+</resources>

@@ -68,6 +68,24 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         return pm.isInteractive
     }
 
+    // Hálózati állapot a lekérdezéshez:
+    // - WIFI: van csatlakozott Wi-Fi (bármelyik hálózat, nem csak az aktív: bekapcsolt
+    //   Tailscale mellett az aktív hálózat maga a VPN, így otthon is "nem Wi-Fi"-nek látszana);
+    // - VPN: Wi-Fi nincs, de aktív VPN (Tailscale) van -> mobilneten is hazaér;
+    // - NONE: egyik sem -> nem kérdezünk (idegen hálózat címeit nem próbálgatjuk).
+    private enum class NetMode { WIFI, VPN, NONE }
+
+    private fun currentNetMode(cm: ConnectivityManager): NetMode {
+        @Suppress("DEPRECATION")
+        val anyWifi = cm.allNetworks.any {
+            cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+        if (anyWifi) return NetMode.WIFI
+        val activeIsVpn = cm.getNetworkCapabilities(cm.activeNetwork)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        return if (activeIsVpn) NetMode.VPN else NetMode.NONE
+    }
+
     override fun doWork(): Result {
         val client = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
@@ -103,10 +121,14 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             // vagy cancel), illetve a képernyő kikapcsolása (lezárt telefonon nem pazarlunk
             // akkumulátort és hálózatot).
             while (!isStopped && isScreenOn()) {
-                fetchAndUpdate(cm, client)
+                val mode = currentNetMode(cm)
+                fetchAndUpdate(mode, client)
 
-                // 5 mp várakozás, de a stop jelzésre és a WiFi visszatérésére is figyelünk
-                val sleepEnd = System.currentTimeMillis() + 5000
+                // Várakozás: Wi-Fin 5 mp, Wi-Fi nélkül VPN-en át (mobilnet) 30 mp a mobiladat
+                // kímélése miatt. A stop jelzésre és a WiFi visszatérésére is figyelünk: hazaérve
+                // azonnal frissít, és visszaáll az 5 mp-es ütem.
+                val pauseMs = if (mode == NetMode.VPN) 30_000L else 5_000L
+                val sleepEnd = System.currentTimeMillis() + pauseMs
                 while (System.currentTimeMillis() < sleepEnd && !isStopped) {
                     if (wifiReconnected.getAndSet(false)) break
                     Thread.sleep(100)
@@ -140,12 +162,9 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         return Result.success()
     }
 
-    private fun fetchAndUpdate(cm: ConnectivityManager, client: OkHttpClient) {
-        // WiFi ellenőrzés
-        val hasWifi = cm.getNetworkCapabilities(cm.activeNetwork)
-            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-
-        if (!hasWifi) {
+    private fun fetchAndUpdate(mode: NetMode, client: OkHttpClient) {
+        // Csak Wi-Fin vagy aktív VPN-en (Tailscale) át kérdezünk
+        if (mode == NetMode.NONE) {
             updateUIOffline()
             return
         }

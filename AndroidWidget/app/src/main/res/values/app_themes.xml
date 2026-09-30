@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Az app képernyőinek témája: világos/sötét a telefon beállítása szerint (DayNight) -->
+    <style name="Theme.Otthon" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/o_accent</item>
+        <item name="colorSecondary">@color/o_accent</item>
+        <item name="android:windowBackground">@color/o_bg</item>
+        <item name="android:statusBarColor">@color/o_bg</item>
+        <item name="android:navigationBarColor">@color/o_bg</item>
+        <item name="android:windowLightStatusBar">@bool/o_light_status</item>
+    </style>
+</resources>
