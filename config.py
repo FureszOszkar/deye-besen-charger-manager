@@ -78,10 +78,12 @@ DEFAULT_CONFIG["shading"] = {
 # típusazonosítója (model) csak itt állíthatók; a napi időzítők az appból / a felületről, a rádió
 # megtanított kódja a felületről mentődik ide.
 HOME_DEVICES = ("led", "plug", "radio")
+HOME_SCHEDULE_KEYS = {"plug": ("on", "off", "on2", "off2"), "radio": ("on", "off")}
 DEFAULT_CONFIG["home_devices"] = {
     "led": {"name": "LED-szalag", "ip": ""},
+    # A konnektor naponta két be-ki párt kap (on/off és on2/off2; pl. lámpa reggel és este).
     "plug": {"name": "Konnektor", "ip": "", "token": "", "model": "", "enabled": False,
-             "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS]},
+             "schedule": [{"day": d, "on": "", "off": "", "on2": "", "off2": ""} for d in WEEK_DAYS]},
     "radio": {"name": "Internet-rádió", "broadlink_ip": "", "ir_power": "", "enabled": False,
               "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS]},
 }
@@ -216,7 +218,8 @@ shared_state = {
         "led": {"name": "LED-szalag", "configured": False, "reachable": None, "on": None,
                 "brightness": None, "hue": None, "saturation": None, "error": "", "updated": 0.0},
         "plug": {"name": "Konnektor", "configured": False, "reachable": None, "on": None,
-                 "enabled": False, "schedule": [{"day": d, "on": "", "off": ""} for d in WEEK_DAYS],
+                 "enabled": False,
+                 "schedule": [{"day": d, "on": "", "off": "", "on2": "", "off2": ""} for d in WEEK_DAYS],
                  "error": "", "updated": 0.0,
                  "last_result": "", "last_result_ok": None, "last_result_time": 0.0},
         # Internet-rádió: a megtanított kód nélkül, csak hogy megvan-e. Az infra egyirányú, a rádió
@@ -339,9 +342,10 @@ def normalize_home_config(raw):
         dst["enabled"] = bool(src.get("enabled", False))
         sched = src.get("schedule")
         if isinstance(sched, list):
+            time_keys = HOME_SCHEDULE_KEYS[name]   # régi config (csak on/off): a 2. pár üres marad
             for i, day in enumerate(sched[:len(WEEK_DAYS)]):
                 if isinstance(day, dict):
-                    for key in ("on", "off"):
+                    for key in time_keys:
                         if isinstance(day.get(key), str):
                             dst["schedule"][i][key] = day[key].strip()
     return result

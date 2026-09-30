@@ -319,16 +319,17 @@ async def _run_plug_timer(fired):
         times = dict(plug["schedule"][now.tm_wday])
     if not enabled:
         return fired
-    for action in ("on", "off"):
+    for action in cfg.HOME_SCHEDULE_KEYS["plug"]:      # két be-ki pár: on/off és on2/off2
         if times.get(action) != hhmm or (action, stamp) in fired:
             continue
         fired.add((action, stamp))
-        label = "bekapcsolás" if action == "on" else "kikapcsolás"
+        switch_on = action in ("on", "on2")
+        label = "bekapcsolás" if switch_on else "kikapcsolás"
         if not _plug_lock.acquire(blocking=False):
             log_message(f"[OTTHON] A konnektor időzített {label}a kimaradt: épp egy másik művelet fut.")
             continue
         try:
-            ok, msg = await asyncio.wait_for(asyncio.to_thread(_plug_switch_blocking, action == "on"),
+            ok, msg = await asyncio.wait_for(asyncio.to_thread(_plug_switch_blocking, switch_on),
                                              timeout=DEVICE_TIMEOUT_S)
         except asyncio.TimeoutError:
             ok, msg = False, "a kapcsolás túllépte az időkorlátot."
@@ -501,7 +502,9 @@ def plug_set(data):
 
 def _save_schedule(device, log_name, data):
     """Egy napi be/ki időzítő ATOMI mentése a config.json-ba (konnektor, rádió):
-    {"enabled": bool, "schedule": [7 × {"on": "HH:MM"|"", "off": "HH:MM"|""}]}."""
+    {"enabled": bool, "schedule": [7 × {az eszköz időpont-mezői: "HH:MM"|""}]}. A mezők
+    (cfg.HOME_SCHEDULE_KEYS) mind kötelezők: a konnektornál on/off/on2/off2, a rádiónál on/off.
+    Hiányzó mező = elutasítás, hogy egy régi (csak on/off-ot küldő) app ne törölje a 2. párt."""
     if not isinstance(data, dict):
         return False, "Hibás adatformátum."
     enabled = data.get("enabled")
@@ -513,8 +516,8 @@ def _save_schedule(device, log_name, data):
         if not isinstance(day, dict):
             return False, "Hibás adatformátum."
         entry = {}
-        for key in ("on", "off"):
-            value = day.get(key, "")
+        for key in cfg.HOME_SCHEDULE_KEYS[device]:
+            value = day.get(key)
             if not isinstance(value, str):
                 return False, "Hibás adatformátum."
             value = value.strip()
@@ -527,8 +530,7 @@ def _save_schedule(device, log_name, data):
         block = cfg.HOME_CONFIG[device]
         block["enabled"] = enabled
         for i, entry in enumerate(parsed):
-            block["schedule"][i]["on"] = entry["on"]
-            block["schedule"][i]["off"] = entry["off"]
+            block["schedule"][i].update(entry)
         cfg.refresh_home_public_state()
     save_config_file()
     log_message(f"[OTTHON] {log_name} időzítő mentve ({'aktív' if enabled else 'kikapcsolva'}).")
@@ -536,7 +538,7 @@ def _save_schedule(device, log_name, data):
 
 
 def update_plug_schedule(data):
-    """A konnektor napi időzítőjének mentése (lásd _save_schedule)."""
+    """A konnektor napi időzítőjének mentése, naponta két be-ki párral (lásd _save_schedule)."""
     return _save_schedule("plug", "Konnektor", data)
 
 

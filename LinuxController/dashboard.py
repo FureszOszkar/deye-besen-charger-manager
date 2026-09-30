@@ -2362,8 +2362,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </details>
         </div>
 
-        <!-- EGYÉB — internet-rádió (infra, BroadLink, egyetlen power kód); csak asztali nézetben -->
-        <div class="card" id="other-radio-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem; min-height: auto;">
+        <!-- EGYÉB — csak asztali nézetben. Két hasáb: bal az internet-rádió (infra, BroadLink, egyetlen
+             power kód), jobb a konnektor; a rácsban soronként: a két eszköz kártyája, alattuk a két időzítő -->
+        <div class="card" id="other-radio-card" style="display: none; flex-direction: column; gap: 0.8rem; min-height: auto;">
             <div class="card-title" style="justify-content:flex-start; gap:0.4rem;">Internet-rádió <span id="radio_broadlink" class="climate-status" style="font-weight:400;"></span></div>
             <div id="radio_status" class="climate-status"></div>
             <div class="climate-btns">
@@ -2373,7 +2374,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="climate-status">Tanítás: a gomb után 30 mp-en belül nyomd meg a távirányító power gombját a BroadLink felé fordítva.</div>
         </div>
 
-        <div class="card shading-card" id="other-radio-timer-card" style="display: none; grid-column: span 2; flex-direction: column; gap: 0.8rem;">
+        <div class="card" id="other-plug-card" style="display: none; flex-direction: column; gap: 0.8rem; min-height: auto;">
+            <div class="card-title" id="plug_title" style="justify-content:flex-start;">Konnektor</div>
+            <div id="plug_status" class="climate-status"></div>
+            <div class="climate-btns">
+                <button type="button" class="action-btn action-btn-start" style="flex:0 0 auto;" onclick="plugSwitch(true)">Bekapcsolás</button>
+                <button type="button" class="action-btn action-btn-stop" style="flex:0 0 auto;" onclick="plugSwitch(false)">Kikapcsolás</button>
+            </div>
+        </div>
+
+        <div class="card shading-card" id="other-radio-timer-card" style="display: none; flex-direction: column; gap: 0.8rem;">
             <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
                 Időzítő
                 <label class="checkbox-group"><input type="checkbox" id="radio_enabled"> Időzítő aktív</label>
@@ -2393,6 +2403,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </table>
             <div>
                 <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="saveRadioSchedule()">Mentés</button>
+            </div>
+        </div>
+
+        <div class="card shading-card" id="other-plug-timer-card" style="display: none; flex-direction: column; gap: 0.8rem;">
+            <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+                Időzítő
+                <label class="checkbox-group"><input type="checkbox" id="plug_enabled"> Időzítő aktív</label>
+            </div>
+            <table class="shading-table">
+                <thead><tr><th></th><th>1. Be</th><th>1. Ki</th><th>2. Be</th><th>2. Ki</th></tr></thead>
+                <tbody id="plug_schedule_rows"></tbody>
+            </table>
+            <div>
+                <button type="button" class="action-btn action-btn-start" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="savePlugSchedule()">Mentés</button>
             </div>
         </div>
 
@@ -3220,6 +3244,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (data.climate) renderClimate(data.climate);
                 if (data.shading) renderShading(data.shading);
                 if (data.home && data.home.radio) renderRadio(data.home.radio, data.climate);
+                if (data.home && data.home.plug) renderPlug(data.home.plug);
 
                 // Inverter kapcsolat
                 const inverterBadge = document.getElementById('badge-inverter');
@@ -3700,7 +3725,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const boilerCard = document.getElementById('boiler-card');
             const shadingCards = ['shading-roller-card', 'shading-awning-card', 'shading-devices-card']
                 .map(id => document.getElementById(id));
-            const otherCards = ['other-radio-card', 'other-radio-timer-card'].map(id => document.getElementById(id));
+            const otherCards = ['other-radio-card', 'other-plug-card', 'other-radio-timer-card', 'other-plug-timer-card']
+                .map(id => document.getElementById(id));
             const show = (el, disp) => { if (el) el.style.display = disp; };
 
             // Mindent elrejtünk, majd az adott nézet kártyáit megjelenítjük
@@ -3736,7 +3762,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     // Asztali, Árnyékolás: bal a Redőny, jobb a Napellenző, alattuk az eszközök
                     shadingCards.forEach(el => show(el, 'flex'));
                 } else if (currentPage === 'other') {
-                    // Asztali, Egyéb: az internet-rádió, alatta az időzítője
+                    // Asztali, Egyéb: bal hasáb az internet-rádió és az időzítője, jobb a konnektor és az időzítője
                     otherCards.forEach(el => show(el, 'flex'));
                 } else {
                     // Asztali, Autótöltő: a megszokott elrendezés
@@ -4124,6 +4150,96 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
                 if (res.status === 'success') {
                     radioFormLoaded = false;
+                    updateStatus();
+                }
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        // === EGYÉB: konnektor (Xiaomi, helyi miIO); napi két be-ki pár (on/off, on2/off2) ===
+        const PLUG_TIME_KEYS = ['on', 'off', 'on2', 'off2'];
+        let plugFormLoaded = false;
+
+        function buildPlugScheduleRows() {
+            const body = document.getElementById('plug_schedule_rows');
+            if (!body || body.childElementCount) return;
+            ['Hétfő', 'Kedd', 'Szerda', 'Csütörtök', 'Péntek', 'Szombat', 'Vasárnap'].forEach((day, i) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${day}</td>` + PLUG_TIME_KEYS.map(k => `<td><input type="time" id="plug_${k}_${i}"></td>`).join('');
+                body.appendChild(tr);
+            });
+        }
+
+        function renderPlug(p) {
+            buildPlugScheduleRows();
+            const title = document.getElementById('plug_title');
+            if (title) title.textContent = p.name || 'Konnektor';
+            const st = document.getElementById('plug_status');
+            if (st) {
+                let html;
+                if (!p.configured) {
+                    html = 'Nincs beállítva (IP-cím és kulcs a config.json-ban: home_devices.plug).';
+                } else if (p.reachable === null || p.reachable === undefined) {
+                    html = 'Lekérdezés…';
+                } else if (!p.reachable) {
+                    html = `<span style="color:var(--danger, #ef4444)">Nem érhető el: ${escapeHtml(p.error || '')}</span>`;
+                } else {
+                    html = `Állapot: <span style="color:${p.on ? 'var(--success, #22c55e)' : 'inherit'}">${p.on ? 'Be' : 'Ki'}</span> · elérhető`;
+                }
+                if (p.last_result) {
+                    const when = p.last_result_time ? new Date(p.last_result_time * 1000).toLocaleTimeString('hu-HU') : '';
+                    html += `<br><span style="color:${p.last_result_ok ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)'}">${escapeHtml(p.last_result)}</span> (${when})`;
+                }
+                st.innerHTML = html;
+            }
+            // Az időzítő-űrlapot csak egyszer töltjük ki (és mentés után), hogy a frissítés ne írja felül a gépelést
+            if (!plugFormLoaded) {
+                const en = document.getElementById('plug_enabled');
+                if (en) en.checked = !!p.enabled;
+                (p.schedule || []).forEach((day, i) => {
+                    PLUG_TIME_KEYS.forEach(k => {
+                        const input = document.getElementById(`plug_${k}_${i}`);
+                        if (input) input.value = day[k] || '';
+                    });
+                });
+                plugFormLoaded = true;
+            }
+        }
+
+        async function plugSwitch(on) {
+            try {
+                const response = await fetch('/api/plug/set', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ on: on })
+                });
+                const res = await response.json();
+                if (res.status !== 'success') alert(res.message);
+                updateStatus();
+            } catch (err) {
+                alert('Hiba: ' + err);
+            }
+        }
+
+        async function savePlugSchedule() {
+            const schedule = [];
+            for (let i = 0; i < 7; i++) {
+                const day = {};
+                PLUG_TIME_KEYS.forEach(k => { day[k] = document.getElementById(`plug_${k}_${i}`).value; });
+                schedule.push(day);
+            }
+            const body = { enabled: document.getElementById('plug_enabled').checked, schedule: schedule };
+            try {
+                const response = await fetch('/api/plug/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const res = await response.json();
+                alert(res.message || (res.status === 'success' ? 'Mentve.' : 'Mentés sikertelen.'));
+                if (res.status === 'success') {
+                    plugFormLoaded = false;
                     updateStatus();
                 }
             } catch (err) {
