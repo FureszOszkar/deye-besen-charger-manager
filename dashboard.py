@@ -4807,7 +4807,9 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             try:
                 config_data = self._read_encrypted_body()
 
-                # Validáció ELŐBB, alkalmazás ELŐTT — atomi: vagy minden érvényes, vagy semmi sem változik
+                # Validáció ELŐBB, alkalmazás ELŐTT — atomi: vagy minden érvényes, vagy semmi sem változik.
+                # Hibánál csak hibaüzenet megy vissza: itt még semmi nem lett alkalmazva, ezért nincs mit
+                # visszaállítani (egy load_config() hívás kikapcsolná a futó üzemmódot és az automatizmusokat).
                 numeric_fields = ["start_soc", "stop_soc", "stop_import_limit",
                                   "grid_charge_duration_minutes", "house_power_limit_w", "charger_max_amps"]
                 validated = {}
@@ -4815,29 +4817,25 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     if field in config_data:
                         raw = config_data[field]
                         if raw is None:
-                            load_config()
-                            self._send_encrypted_json({"status": "error", "message": "Hibás adattartalom miatt visszaállt a konfig az eredetire"})
+                            self._send_encrypted_json({"status": "error", "message": "Hibás adattartalom (üres mező): a beállítások nem változtak."})
                             return
                         validated[field] = int(raw)
 
                 if "charger_max_amps" in validated:
                     amps_val = validated["charger_max_amps"]
                     if not (6 <= amps_val <= 16):
-                        load_config()
                         self._send_encrypted_json({"status": "error", "message": f"Érvénytelen áramerősség: {amps_val}A (megengedett: 6-16A)"})
                         return
 
                 new_start = validated.get("start_soc", shared_state.get("start_soc"))
                 new_stop = validated.get("stop_soc", shared_state.get("stop_soc"))
                 if new_start is not None and new_stop is not None and new_start < new_stop:
-                    load_config()
                     self._send_encrypted_json({"status": "error", "message": f"Hiba: A Start % ({new_start}%) nem lehet kisebb a Stop %-nál ({new_stop}%)!"})
                     return
 
                 # Minimum 2 százalékpontos rés kikényszerítése Start és Stop % között (ha a Stop % be van kapcsolva),
                 # hogy egyetlen SoC-mérési ingadozás ne okozzon azonnali indítás/leállítás pattogást.
                 if new_start is not None and new_stop is not None and new_stop > 0 and (new_start - new_stop) < 2:
-                    load_config()
                     self._send_encrypted_json({"status": "error", "message": f"Hiba: A Start % ({new_start}%) és a Stop % ({new_stop}%) közötti különbségnek legalább 2 százalékpontnak kell lennie, különben a rendszer a SoC ingadozása miatt feleslegesen gyakran kapcsolgatna!"})
                     return
 
@@ -4845,7 +4843,6 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
                     try:
                         validated_schedule = validate_forced_schedule(config_data["forced_schedule"])
                     except ValueError as ve:
-                        load_config()
                         self._send_encrypted_json({"status": "error", "message": f"Hiba az ütemezésben: {ve}"})
                         return
                 else:
@@ -4976,7 +4973,10 @@ class ControllerHTTPHandler(BaseHTTPRequestHandler):
             try:
                 mode_data = self._read_encrypted_body()
                 new_submode = mode_data.get("force_submode")
-                if new_submode in ("manual_start", "manual_stop", "schedule"):
+                if new_submode == "manual_start" and shared_state.get("charger_max_amps") is None:
+                    # Töltőáram nélkül nem lehet START csomagot építeni: érthető hiba, semmi nem változik
+                    self._send_encrypted_json({"status": "error", "message": "A kézi indításhoz előbb add meg és mentsd el a töltőáramot (A)."})
+                elif new_submode in ("manual_start", "manual_stop", "schedule"):
                     with state_lock:
                         shared_state["force_submode"] = new_submode
                         # Töröljük a hibajelzést és a cooldown-t

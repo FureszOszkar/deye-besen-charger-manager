@@ -288,6 +288,7 @@ To control a charger other than BESEN (e.g., Go-e, Tesla Wall Connector, Shelly 
 
 ### 6.1 Cooldown and Lockdown
 To protect the charger from rapid state switching (flapping) and infinite start/stop loops:
+0. **They block only starting:** the limits below (and the `cooldown_until` cooldown) block START commands only. **A STOP can always go out** — previously the plain out-of-window STOP was blocked in lockdown and charging continued. During a cooldown the stop rules also keep running if the car is charging.
 1. **Cooldown (20s window):** A sliding 20-second window allows a maximum of 2 state transitions.
 2. **Lockdown (40s window):** If 4 state transitions occur within a 40-second window, the system enters a Lockdown mode on the 5th attempt.
 3. **Auto-Loop Protection (5-minute sliding window):** If the system executes 10 automated start/stop commands within a 5-minute window without user interaction, it enters Lockdown mode. The counter is a timestamped list (`auto_command_timestamps`) that drops entries older than 5 minutes on every check — so a long-running, healthy automation (e.g. 1-2 automated commands per day) never accumulates an unbounded count; only genuinely frequent (once-a-minute-or-faster) flapping trips it. (Before 2026-08-13 this was a plain, never-decreasing counter, which meant a perfectly healthy, purely automated system would theoretically have hit the lockdown threshold eventually, purely with the passage of time — see the 2026-08-13 changelog entry.) Automated safety stops (e.g., due to low battery SoC) use the `is_safety_stop` flag which preserves this counter, ensuring protection against infinite flapping caused by misconfiguration.
@@ -296,6 +297,12 @@ To protect the charger from rapid state switching (flapping) and infinite start/
 
 ### 6.2 Configuration Validation
 When saving configurations via the dashboard or loading them from disk, the system applies logical validations.
+
+**A rejected save restores nothing:** on validation errors the handler only returns an error message. It used to call `load_config()`, which — with `persist_mode_on_restart` off — switched to monitoring and turned the automations off, so a rejected form silently stopped the schedule.
+
+**Safe writing to disk (`save_config_file`):** the snapshot is taken under `state_lock` with a sequence number; the write happens under a separate lock (`_save_lock`), so threads do not write at the same time and an older snapshot cannot overwrite a newer one. The write goes to a temporary file (`config.json.tmp`, `fsync`), the old file becomes `config.json.bak`, then `os.replace` puts the new one in place. If no file can be created in the folder, a direct write is used (with a one-time log warning).
+
+**Corrupt or missing `config.json` (`_read_saved_config`):** the corrupt file is moved aside as `config.json.corrupt-<date>`, `config.json.bak` is loaded (and copied back as `config.json`), and the error goes to the log and the dashboard's error box (`error_message`). If the `.bak` cannot be read either: defaults.
 
 **Atomic server-side null validation (empty-field protection):** The `/api/config` handler reads all numeric field values from `config_data` FIRST, before applying any of them. If any value is `null` (JSON null — sent when the client has an empty input field, since `JSON.stringify(NaN) === null`) OR `charger_max_amps` is outside the 6-16A range, the handler: (1) calls `load_config()` to restore `shared_state` from the last known-good `config.json` (no partial mutation occurs), and (2) returns `{"status": "error", "message": "Hibás adattartalom miatt visszaállt a konfig az eredetire"}` as clean JSON. Only when every field is valid are they applied atomically inside a single `with state_lock:` block. This server-side guard protects against empty fields regardless of what the client code does — if client code ever introduces a `|| fallback` coercion, the value silently becomes a plausible number, but if it doesn't and the empty field reaches the server as `null`, the server will always catch it.
 
@@ -320,6 +327,24 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 ---
 
 ## 7. Recent Fixes and Hardening
+
+### 2026-10-02
+
+> **Status:** these changes exist only on the `javitasok-2026-10-02` branch. They ran live for a short time; the user saw the inverter connection being dropped, so the running version was restored. The cause has not been investigated. Details: `VALTOZASOK_2026-10-02.md`.
+
+**Fixes after the review, steps 1–2: safe config saving and charge control (`config.py`, `dashboard.py`, `charging_logic.py`, `main.py`, service file).** At the user's request the whole software was reviewed; these are the most serious of the findings.
+* **Config:** saving was not atomic (a power cut during a save could leave a truncated file, after which the program would have started with defaults — password "admin", no device addresses or learned codes). Now a temporary file + replace, `config.json.bak`, and loading the `.bak` when the file is corrupt (user decision). Details: 6.2.
+* **Form error:** `/api/config` validation errors no longer call `load_config()` (see 6.2).
+* **Log:** output is flushed before a forced exit (`sys.stdout.flush()`), and the service file sets `PYTHONUNBUFFERED=1` — the last lines before a stop used to be lost.
+* **Bluetooth dropout:** the controller treated a dropout as the end of charging and cleared `started_by_controller`; after reconnecting the session counted as externally started, so it was not stopped at the end of the time window or by the grid-import rule. Fix: `charger_ready` — the controller decides only when the charger is connected **and** telemetry has arrived since the (re)connect (`charger_telemetry_ok`).
+* **Lockdown:** the lockdown also blocked the plain out-of-window STOP. Now the lockdown and the switching limits block only starting (6.1).
+* **Start/stop cycling:** after a rule-based stop Solar Auto restarted immediately (it only checked the battery level). It now waits 5 minutes (`RULE_STOP_RESTART_WAIT_S`; user decision: fixed 5 minutes); a manual start is not affected.
+* **Cooldown:** during a cooldown the stop rules did not run either. Now the cooldown blocks only starting.
+* **Stop confirmation:** a STOP could be lost (BLE error) while the program assumed it was sent. It now checks the telemetry and repeats the STOP every 60 s (`STOP_CONFIRM_TIMEOUT_S`) until charging stops (user decision); `started_by_controller` is cleared by the confirmed stop, not by sending the STOP.
+* **Energy counter:** after a telemetry gap longer than 30 s it stopped counting until the end of the session. Fixed.
+* **Missing charging current:** on a manual start the controller died with an exception and the Watchdog restarted it every 10 seconds. Now an error message (`/api/force_submode`) and a one-time log line; a mode with missing (`None`) settings is skipped.
+* **Verification:** new `config_save_test` (26 cases: interrupted save, concurrent saves, older snapshot, corrupt/missing file, `.bak`, unwritable folder, rejected forms) and `charge_controller_l2_test` (38 cases with the real controller and a virtual clock: dropout mid-window then window end, lockdown, the 5-minute wait, overload during cooldown, missing settings, STOP repeats, energy counter); the same test fails in 12 places on the pre-fix code. The earlier tests still pass. `--sim` check: the mode survives a rejected form; Solar Auto start → overload → STOP → confirmation → no immediate restart, no lockdown.
+* **Observation:** the post-dropout bug was timing-dependent in the old code — if the controller ran between the reconnect and the first telemetry, it re-sent START in scheduled mode (which accidentally "gave back" the session); otherwise the session counted as external.
 
 ### 2026-10-01
 

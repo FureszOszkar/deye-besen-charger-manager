@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=deyecontroller
 WorkingDirectory=__APP_DIR__
+# A naplo soronkent, azonnal keruljon a journalba: pufferelve a leallitas elotti utolso sorok elvesznenek
+Environment=PYTHONUNBUFFERED=1
 ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/main.py
 Restart=on-failure
 RestartSec=5

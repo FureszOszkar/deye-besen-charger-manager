@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import stat
 import threading
 import time
 
@@ -120,6 +122,7 @@ shared_state = {
     # Kapcsolatok állapota
     "inverter_connected": False,
     "charger_connected": False,
+    "charger_telemetry_ok": False,  # a (újra)csatlakozás óta érkezett-e már telemetria (addig nem tudjuk, tölt-e az autó)
     "session_energy_accumulator": 0.0,
     "session_last_time": 0.0,
     "session_last_power": 0.0,
@@ -403,20 +406,73 @@ def refresh_climate_public_state():
         pub["units"][i]["has_off"] = bool(unit["ir_off"])
 
 # --- KONFIGURÁCIÓ KEZELÉS ---
+# A mentés előző jó példánya: sérült vagy hiányzó config.json esetén ebből töltünk be.
+CONFIG_BACKUP_FILE = CONFIG_FILE + ".bak"
+_save_lock = threading.Lock()   # egyszerre egy mentés ír a lemezre (web, vezérlő, klíma, árnyékolás, otthon)
+_save_seq = 0                   # a pillanatképek sorszáma (state_lock alatt nő)
+_saved_seq = 0                  # a lemezre utoljára kiírt pillanatkép sorszáma (_save_lock alatt)
+_direct_write_warned = False
+
+
+def _read_json_object(path):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("a fájl tartalma nem JSON-objektum")
+    return data
+
+
+def _read_saved_config():
+    """A mentett beállítások beolvasása. Sérült config.json: a fájlt félretesszük (nem írjuk
+    felül), és az utolsó jó mentést (config.json.bak) töltjük be. Visszatérés: (beállítások vagy
+    None, a felületre és a naplóba szánt hibaüzenet vagy "")."""
+    problem = ""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            return _read_json_object(CONFIG_FILE), ""
+        except Exception as e:
+            aside = f"{CONFIG_FILE}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+            n = 2
+            while os.path.exists(aside):     # ugyanabban a másodpercben se írjunk felül egy korábbit
+                aside = f"{CONFIG_FILE}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}-{n}"
+                n += 1
+            try:
+                os.replace(CONFIG_FILE, aside)
+                problem = f"A config.json sérült ({e}); félretéve: {aside}."
+            except OSError as move_error:
+                problem = f"A config.json sérült ({e}); félretenni nem sikerült: {move_error}."
+    elif os.path.exists(CONFIG_BACKUP_FILE):
+        problem = "A config.json hiányzik."
+    else:
+        return None, ""     # első indulás: nincs mentett beállítás
+    if os.path.exists(CONFIG_BACKUP_FILE):
+        try:
+            saved = _read_json_object(CONFIG_BACKUP_FILE)
+            try:
+                # Visszaállítjuk config.json-ként is, hogy a következő betöltés már ebből olvasson
+                shutil.copyfile(CONFIG_BACKUP_FILE, CONFIG_FILE)
+            except OSError:
+                pass    # a következő sikeres mentés úgyis létrehozza
+            return saved, problem + " Az utolsó jó mentés (config.json.bak) lett betöltve — ellenőrizd a beállításokat."
+        except Exception as e:
+            problem += f" A config.json.bak sem olvasható ({e})."
+    else:
+        problem += " Biztonsági mentés (config.json.bak) nincs."
+    return None, problem + " Alapértelmezett értékek használata."
+
+
 def load_config():
     global shared_state, CHARGER_NAME, CHARGER_MAC, charger_password
     global INVERTER_IP, INVERTER_PORT, LOGGER_SERIAL, HTTP_PORT, WEB_AUTH_ENABLED, WEB_PASSWORD, PBKDF2_ITERATIONS
     global _last_initiated_session_id, CLIMATE_CONFIG, SHADING_CONFIG, HOME_CONFIG
     config = DEFAULT_CONFIG.copy()
-    
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-                config.update(saved)
-        except Exception as e:
-            print(f"Hiba a konfigurációs fájl beolvasásakor: {e}. Alapértelmezett értékek használata.")
-            
+
+    saved, config_problem = _read_saved_config()
+    if saved is not None:
+        config.update(saved)
+    if config_problem:
+        print(f"Hiba a konfigurációs fájl beolvasásakor: {config_problem}")
+
     # Állapot frissítése
     with state_lock:
         if config.get("start_soc") is not None:
@@ -545,9 +601,48 @@ def load_config():
     shared_state["session_last_time"] = float(config.get("session_last_time", 0.0))
     shared_state["session_last_power"] = float(config.get("session_last_power", 0.0))
 
+    if config_problem:
+        # A felületen is látszódjon (piros hibadoboz), és a naplóba is bekerüljön
+        with state_lock:
+            shared_state["error_message"] = config_problem
+        log_message(f"[KONFIG] {config_problem}")
+
+
+def _write_config_atomic(config_data):
+    """A beállítások kiírása úgy, hogy egy megszakadt mentés (áramszünet, kényszerleállítás) ne
+    hagyhasson csonka config.json-t: ideiglenes fájlba írunk, lemezre kényszerítjük, és csak utána
+    cseréljük le a fájlt. A csere előtti példány config.json.bak néven megmarad."""
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=4, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    if os.path.exists(CONFIG_FILE):
+        # Az új fájl örökölje a régi jogosultságait és tulajdonosát: a csere különben a program
+        # felhasználójának alapjogaival hozná létre, és aki eddig szerkeszthette a config.json-t
+        # (pl. egy megosztáson át, más felhasználóként), az utána már nem tudná.
+        try:
+            old = os.stat(CONFIG_FILE)
+            try:
+                os.chmod(tmp, stat.S_IMODE(old.st_mode))
+            except OSError:
+                pass
+            if hasattr(os, "chown"):
+                try:
+                    os.chown(tmp, old.st_uid, old.st_gid)
+                except OSError:
+                    pass    # nem rendszergazdaként a tulajdonos nem állítható; a jogosultság így is megmarad
+        except OSError:
+            pass
+        os.replace(CONFIG_FILE, CONFIG_BACKUP_FILE)
+    os.replace(tmp, CONFIG_FILE)
+
+
 def save_config_file():
-    global _last_initiated_session_id
+    global _last_initiated_session_id, _save_seq, _saved_seq, _direct_write_warned
     with state_lock:
+        _save_seq += 1
+        seq = _save_seq
         try:
             decoded = charger_password.decode('utf-8', errors='strict')
             if decoded.isalnum() and len(decoded) <= 6:
@@ -591,11 +686,32 @@ def save_config_file():
             "shading": json.loads(json.dumps(SHADING_CONFIG)),
             "home_devices": json.loads(json.dumps(HOME_CONFIG))
         }
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        log_message(f"Hiba a konfiguráció mentésekor: {e}")
+    # A naplózás a _save_lock-on KÍVÜL történik: a log_message a state_lock-ot fogja meg, amit egy
+    # másik, épp mentésre váró szál tarthat.
+    messages = []
+    with _save_lock:
+        if seq < _saved_seq:
+            return      # egy frissebb pillanatkép már a lemezen van; a régebbi nem írhatja felül
+        try:
+            _write_config_atomic(config_data)
+            _saved_seq = seq
+        except OSError as atomic_error:
+            # Ha a mappába nem tudunk új fájlt létrehozni (pl. a szolgáltatás felhasználója csak
+            # magát a config.json-t írhatja), marad a közvetlen írás, hogy a mentés ne vesszen el.
+            try:
+                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                    json.dump(config_data, f, indent=4, ensure_ascii=False)
+                _saved_seq = seq
+                if not _direct_write_warned:
+                    _direct_write_warned = True
+                    messages.append(f"[KONFIG] A biztonságos mentés nem sikerült ({atomic_error}); közvetlen "
+                                    f"írás történt. Ellenőrizd, hogy a program írhatja-e a mappáját.")
+            except Exception as e:
+                messages.append(f"Hiba a konfiguráció mentésekor: {e}")
+        except Exception as e:
+            messages.append(f"Hiba a konfiguráció mentésekor: {e}")
+    for message in messages:
+        log_message(message)
 
 # --- RENDSZER NAPLÓZÁS ---
 def log_message(msg):

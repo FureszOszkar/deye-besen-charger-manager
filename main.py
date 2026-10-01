@@ -193,6 +193,7 @@ async def main():
             last_web_pong = pongs.get("web", current_time)
             if current_time - last_web_pong > 30:
                 log_message("[WATCHDOG CRITICAL] Befagyás: A webszerver szál 30 másodperce nem küldött PONG jelet! Natív szálat Python nem tud biztonságosan kívülről megszakítani -- a teljes folyamat kényszerített leállítása, hogy a systemd (Restart=on-failure) tisztán újraindítsa.")
+                sys.stdout.flush()   # az os._exit nem üríti a puffert: e nélkül épp ez az üzenet veszne el
                 os._exit(1)
 
         # 4. Erőforrás-figyelés: a nyitott fájlleírók száma (csak Linuxon). Bármilyen szivárgás

@@ -39,6 +39,20 @@ charger_serial = bytearray([0x30, 0x99, 0x83, 0x18, 0x21, 0x29, 0x44, 0x19])
 
 DAYS_MAP = ["Hétfő", "Kedd", "Szerda", "Csütörtök", "Péntek", "Szombat", "Vasárnap"]
 
+# Szabály miatti leállítás (ház-túlterhelés, stop-SoC, hálózati import) után a Solar Auto ennyi ideig
+# nem indít újra (felhasználói döntés: fix 5 perc) -- különben leállítás után pár másodperccel újra
+# indítana, és a pattogás a parancskorlát miatt zároláshoz vezetne. A kézi indítást nem érinti.
+RULE_STOP_RESTART_WAIT_S = 300
+# STOP után ennyi idő múlva nézzük meg, megállt-e a töltés; ha nem, újraküldjük, és ezt ismételjük,
+# amíg le nem áll (felhasználói döntés). Az érték az indítás megerősítésének időkorlátjával egyezik.
+STOP_CONFIRM_TIMEOUT_S = 60.0
+# A vezérlési módokhoz szükséges beállítások neve a naplóüzenetekhez
+SETTING_LABELS = {
+    "start_soc": "Indítási SoC", "stop_soc": "Leállítási SoC", "stop_import_limit": "Max hálózati import",
+    "grid_charge_duration_minutes": "Hálózati import időkorlát", "house_power_limit_w": "Ház túlterhelés-védelem",
+    "charger_max_amps": "töltőáram",
+}
+
 # Szükséges globális változók az eredeti kódból
 _recently_cleared_sessions = {}
 # _last_initiated_session_id: a config modul tárolja, config._last_initiated_session_id-ként olvassuk
@@ -592,6 +606,7 @@ async def run_ble_client():
         except Exception as e:
             with state_lock:
                 shared_state["charger_connected"] = False
+                shared_state["charger_telemetry_ok"] = False   # újracsatlakozás után az első telemetriáig nem tudjuk, tölt-e
                 shared_state["charging_active"] = False
                 shared_state["currents"] = [0.0, 0.0, 0.0]
             active_ble_client = None
@@ -663,9 +678,12 @@ async def run_charge_controller():
         # ami self-deadlockhoz (a teljes program végleges lefagyásához) vezetne.
         blocked = False
         log_after = None
+        # A zárolás (lockdown) és a parancskorlátok csak az INDÍTÁST tiltják: STOP mindig kimehet.
+        # (Korábban az időablakon kívüli sima STOP is blokkolódott, így zárolva a töltés ment tovább.)
+        is_stop = (action == "STOP")
 
         with state_lock:
-            if shared_state.get("lockdown_active") and not (is_manual_hard_stop or is_safety_stop):
+            if shared_state.get("lockdown_active") and not is_stop:
                 log_after = "[VEZÉRLÉS] Parancs blokkolva: A vezérlő biztonsági zárolás (lockdown) alatt áll."
                 blocked = True
             else:
@@ -676,11 +694,11 @@ async def run_charge_controller():
                 shared_state["transition_timestamps"] = ts
 
                 recent_20s = [t for t in ts if now - t < 20]
-                if len(recent_20s) >= 2 and not (is_manual_hard_stop or is_safety_stop):
+                if len(recent_20s) >= 2 and not is_stop:
                     shared_state["cooldown_until"] = now + 20
                     log_after = "[VEZÉRLÉS] Parancs blokkolva: Túl gyakori kapcsolás (cooldown)."
                     blocked = True
-                elif len(ts) >= 4 and not (is_manual_hard_stop or is_safety_stop):
+                elif len(ts) >= 4 and not is_stop:
                     shared_state["lockdown_active"] = True
                     log_after = "[VEZÉRLÉS] Parancs blokkolva: 40 mp-en belüli 5. kapcsolás, RENDSZER ZÁROLVA."
                     blocked = True
@@ -718,6 +736,9 @@ async def run_charge_controller():
     start_command_time = None  # Időpont, mikor a Start parancsot kiküldtük (timeout figyeléshez)
     consecutive_failures = 0  # Egymást követő sikertelen indítási kísérletek száma
     import_exceeded_since = None  # Időpont, mikor a fogyasztás először túllépte a limitet
+    stop_command_time = None  # Időpont, mikor a STOP parancsot kiküldtük (a leállás megerősítéséhez)
+    rule_restart_after = 0.0  # Szabály miatti leállítás után eddig nem indít a Solar Auto
+    missing_logged = None  # A legutóbb naplózott hiányzó beállítások (hogy csak egyszer naplózzuk)
 
     def time_to_minutes(t_str):
         try:
@@ -750,6 +771,9 @@ async def run_charge_controller():
 
             inverter_ok = shared_state["inverter_connected"]
             charger_ok = shared_state["charger_connected"]
+            # A töltő állapota csak akkor megbízható, ha a (újra)csatlakozás óta már érkezett telemetria:
+            # szakadáskor a charging_active hamisra áll, és az első csomagig nem tudjuk, tölt-e az autó.
+            charger_ready = shared_state["simulation"] or (charger_ok and shared_state.get("charger_telemetry_ok", False))
             grid_power = shared_state["grid_power"]
             ups_load_power = shared_state["ups_load_power"]
             charger_power = shared_state["charger_power"]
@@ -802,10 +826,10 @@ async def run_charge_controller():
                 continue
             last_sent_action = "STOP"
             start_command_time = None
+            stop_command_time = current_time
             with state_lock:
                 shared_state["active_current_limit"] = 0
                 shared_state["apply_with_stop"] = False
-                shared_state["started_by_controller"] = False
             save_config_file()
             continue
 
@@ -821,18 +845,46 @@ async def run_charge_controller():
                 continue
             last_sent_action = "STOP"
             start_command_time = None
+            stop_command_time = current_time
             cooldown_time = current_time + 15.0
             with state_lock:
                 shared_state["active_current_limit"] = 0
                 shared_state["cooldown_until"] = cooldown_time
                 shared_state["apply_with_restart"] = False
                 shared_state["restart_pending_start"] = True
-                shared_state["started_by_controller"] = False
             save_config_file()
             continue
 
-        # Ha a töltés nem aktív és nem várunk megerősítésre, engedélyezzük az új parancsokat
-        if not charging_active and start_command_time is None:
+        # --- LEÁLLÍTÁS MEGERŐSÍTÉSE ---
+        # A STOP elveszhet (BLE-írási hiba, szakadás: a parancssor ilyenkor ürül). Ezért a kiküldés után
+        # a telemetriából ellenőrizzük, megállt-e a töltés; ha STOP_CONFIRM_TIMEOUT_S után is tölt,
+        # újraküldjük, és ezt ismételjük, amíg le nem áll. A "mi indítottuk" jelzést (started_by_controller)
+        # csak a megerősített leállás törli (lejjebb), így egy elveszett STOP után a töltés nem válik
+        # "külső indításúvá". Amíg a megerősítésre várunk, nem hozunk új döntést.
+        if stop_command_time is not None:
+            if not charger_ready:
+                continue  # kapcsolat vagy friss telemetria nélkül nem tudjuk, megállt-e; várunk
+            if not charging_active:
+                log_message("[VEZÉRLÉS] A töltés leállása megerősítve a telemetria alapján.")
+                stop_command_time = None
+            elif current_time - stop_command_time >= STOP_CONFIRM_TIMEOUT_S:
+                log_message(f"[VEZÉRLÉS] A töltő a STOP után {int(STOP_CONFIRM_TIMEOUT_S)} mp-cel is tölt. STOP újraküldése...")
+                stop_payload = bytearray(47)
+                stop_payload[0] = line_id
+                stop_payload[1:17] = b"BDmanager".ljust(16, b"\x00")
+                packet = create_ble_packet(0x8008, bytes(stop_payload))
+                await try_send_ble_action(packet, "STOP", is_safety_stop=True)
+                stop_command_time = current_time
+                continue
+            else:
+                continue
+
+        # Ha a töltés nem aktív és nem várunk megerősítésre, engedélyezzük az új parancsokat.
+        # Csak megbízható állapotnál (élő kapcsolat + friss telemetria): BLE-szakadáskor a
+        # charging_active hamisra áll, és e nélkül a feltétel nélkül a saját indítású töltés
+        # "befejezettnek", újracsatlakozás után pedig "külső indításúnak" számítana -- az időablak
+        # végén és a hálózati import szabálynál nem állna le.
+        if not charging_active and start_command_time is None and charger_ready:
             last_sent_action = None
             if shared_state.get("started_by_controller", False):
                 with state_lock:
@@ -930,9 +982,33 @@ async def run_charge_controller():
         # (SoC, hálózati és UPS teljesítmény) alapján -- elavult adatból nem hozunk döntést. A Force (kézi)
         # mód és a fix áramú ("Solar Auto felülírása") ütemezett töltés nem használ inverter-adatot, ezért
         # az inverter (Wi-Fi logger) kiesése nem akadályozhatja az indításukat és leállításukat.
-        if not sim_mode and (not charger_ok or (use_solar_auto_rules and not inverter_ok)):
-            # Kapcsolat nélkül nem tudunk biztonságosan parancsot végrehajtani
+        if not sim_mode and (not charger_ready or (use_solar_auto_rules and not inverter_ok)):
+            # Kapcsolat (vagy a csatlakozás utáni első telemetria) nélkül nem tudunk biztonságosan
+            # parancsot végrehajtani
             continue
+
+        # Hiányzó beállítások: betöltetlen (None) értékkel nem döntünk és nem küldünk parancsot.
+        # Korábban ilyenkor a vezérlő kivétellel leállt, és a Watchdog 10 másodpercenként újraindította.
+        if mode == "force":
+            needed = ("charger_max_amps",) if manual_start_requested else ()
+        elif use_solar_auto_rules:
+            needed = ("start_soc", "stop_soc", "stop_import_limit", "grid_charge_duration_minutes",
+                      "house_power_limit_w", "charger_max_amps")
+        else:
+            needed = ()
+        with state_lock:
+            missing = tuple(name for name in needed if shared_state.get(name) is None)
+        if missing:
+            if (mode, missing) != missing_logged:
+                missing_logged = (mode, missing)
+                names = ", ".join(SETTING_LABELS[name] for name in missing)
+                what = "A kézi indítás" if mode == "force" else "A Solar Auto"
+                log_message(f"[VEZÉRLÉS] Hiányzó beállítás ({names}). {what} nem fut, amíg meg nem adod.")
+            if mode == "force":
+                with state_lock:
+                    shared_state["manual_start_requested"] = False
+            continue
+        missing_logged = None
 
         # Szimulált vagy valós külső indítás kezelése
         is_external_session = sim_external_session if sim_mode else (
@@ -979,12 +1055,14 @@ async def run_charge_controller():
                     # Még várunk a timeout-on belül
                     continue
 
-        # Ha lehűlési idő alatt vagyunk, nem küldünk új parancsot
-        if current_time < cooldown_until:
+        # Lehűlési idő: csak az INDÍTÁST tiltja. Ha közben mégis tölt az autó (pl. a START késve
+        # hatott), a leállítási szabályok (ház-túlterhelés, stop-SoC, időablak vége) tovább futnak.
+        in_cooldown = current_time < cooldown_until
+        if in_cooldown and not charging_active:
             continue
 
         # Ha letelt a lehűlés és újraindításra várunk
-        if restart_pending_start:
+        if restart_pending_start and not in_cooldown:
             with state_lock:
                 shared_state["restart_pending_start"] = False
             restart_pending_start = False
@@ -1000,11 +1078,16 @@ async def run_charge_controller():
                 new_limit = target_amps if in_interval else (charger_max_amps if schedule_solar_auto else 0)
             else:
                 new_limit = charger_max_amps
-            log_message(f"[VEZÉRLÉS] Áramerősség limit frissítve újraindítás nélkül. Új baseline: {new_limit}A")
-            with state_lock:
-                shared_state["active_current_limit"] = new_limit
-                shared_state["reset_limit"] = False
-            active_current_limit = new_limit
+            if new_limit is None:
+                log_message("[VEZÉRLÉS] Az áramerősség limit nem frissíthető: nincs megadva töltőáram.")
+                with state_lock:
+                    shared_state["reset_limit"] = False
+            else:
+                log_message(f"[VEZÉRLÉS] Áramerősség limit frissítve újraindítás nélkül. Új baseline: {new_limit}A")
+                with state_lock:
+                    shared_state["active_current_limit"] = new_limit
+                    shared_state["reset_limit"] = False
+                active_current_limit = new_limit
 
         # Szimulációs elvárt állapot meghatározása (Assertion Engine)
         expected_action = "KEEP"
@@ -1118,7 +1201,7 @@ async def run_charge_controller():
 
         # 1. Kényszerített (Force Charge) Mód
         if mode == "force":
-            if manual_start_requested:
+            if manual_start_requested and not in_cooldown:
                 start_amps = charger_max_amps
                 log_message(f"[VEZÉRLÉS] Kényszerített kézi töltés indítása ({start_amps}A)...")
                 start_payload = bytearray(47)
@@ -1162,10 +1245,11 @@ async def run_charge_controller():
                         continue
 
                     last_sent_action = "STOP"
+                    start_command_time = None
+                    stop_command_time = current_time
                     actual_action = "STOP"
                     with state_lock:
                         shared_state["active_current_limit"] = 0
-                        shared_state["started_by_controller"] = False
                     save_config_file()
                 else:
                     # Már nem aktív a töltés, törölhetjük a manual_stop állapotot
@@ -1180,7 +1264,7 @@ async def run_charge_controller():
 
         # 2. Ütemezett időablak fix áramkorláttal (Prioritás BE)
         elif mode == "schedule" and in_interval and override_auto:
-            if not charging_active and last_sent_action != "START" and not pull_plug:
+            if not charging_active and last_sent_action != "START" and not pull_plug and not in_cooldown:
                 start_amps = target_amps
                 log_message(f"[VEZÉRLÉS] Ütemezési időablak aktív (Prioritás BE). Töltés indítása ({start_amps}A)...")
                 start_payload = bytearray(47)
@@ -1228,19 +1312,19 @@ async def run_charge_controller():
 
                         last_sent_action = "STOP"
                         start_command_time = None
+                        stop_command_time = current_time
                         cooldown_time = current_time + 15.0
                         actual_action = "RESTART"
                         with state_lock:
                             shared_state["active_current_limit"] = 0
                             shared_state["cooldown_until"] = cooldown_time
-                            shared_state["started_by_controller"] = False
                         save_config_file()
 
         # 3. Összevont Solar Auto szabályok
         elif use_solar_auto_rules:
             # --- INDÍTÁSI FELTÉTEL ---
             if not charging_active and last_sent_action != "START":
-                if battery_soc >= start_soc and not pull_plug:
+                if battery_soc >= start_soc and not pull_plug and not in_cooldown and current_time >= rule_restart_after:
                     start_amps = charger_max_amps
                     log_message(
                         f"[VEZÉRLÉS] Solar Auto feltételek teljesültek (Akku SoC: {battery_soc}% >= {start_soc}%). Töltés INDÍTÁSA ({start_amps}A)...")
@@ -1309,7 +1393,8 @@ async def run_charge_controller():
                                 log_message("[VEZÉRLÉS] Hálózati terhelés visszaesett a limit alá. Időzítő törölve.")
 
                 if should_stop:
-                    log_message(f"[VEZÉRLÉS] Solar Auto leállítási ok teljesült: {reason}. Töltés LEÁLLÍTÁSA...")
+                    log_message(f"[VEZÉRLÉS] Solar Auto leállítási ok teljesült: {reason}. Töltés LEÁLLÍTÁSA... "
+                                f"(A Solar Auto {RULE_STOP_RESTART_WAIT_S // 60} percig nem indít újra.)")
 
                     stop_payload = bytearray(47)
                     stop_payload[0] = line_id
@@ -1319,11 +1404,13 @@ async def run_charge_controller():
                         continue
 
                     last_sent_action = "STOP"
+                    start_command_time = None
+                    stop_command_time = current_time
+                    rule_restart_after = current_time + RULE_STOP_RESTART_WAIT_S
                     actual_action = "STOP"
                     import_exceeded_since = None
                     with state_lock:
                         shared_state["active_current_limit"] = 0
-                        shared_state["started_by_controller"] = False
                     save_config_file()
 
         # 4. Időablakon kívül, Solar Auto nélkül -> Töltés leállítása
@@ -1338,14 +1425,17 @@ async def run_charge_controller():
                     continue
 
                 last_sent_action = "STOP"
+                start_command_time = None
+                stop_command_time = current_time
                 actual_action = "STOP"
                 with state_lock:
                     shared_state["active_current_limit"] = 0
-                    shared_state["started_by_controller"] = False
                 save_config_file()
 
         # --- SZABÁLYELLENŐRZÉS KIÉRTÉKELÉSE ---
-        if sim_mode:
+        # (Lehűlés és a szabály miatti leállítás utáni várakozás alatt az indítás szándékosan marad el,
+        # ezt az elvárt-állapot számítás nem ismeri: ilyenkor nem hasonlítunk.)
+        if sim_mode and not in_cooldown and current_time >= rule_restart_after:
             # Összevetjük a várt és a tényleges műveletet
             if expected_action == actual_action:
                 with state_lock:
@@ -1611,10 +1701,13 @@ async def process_assembled_packet(packet, client):
                     if 0 < dt < 30:
                         dE = (current_power * dt) / 3600000.0
                         session_energy_accumulator += dE
-                        last_telemetry_time = current_time
+                    # Az időpontot MINDIG frissítjük: egy 30 mp-nél hosszabb szünetet (pl. BLE-szakadás)
+                    # nem számolunk be, de utána a számlálás folytatódik (korábban a munkamenet végéig leállt).
+                    last_telemetry_time = current_time
 
                 with state_lock:
                     shared_state["charger_connected"] = True
+                    shared_state["charger_telemetry_ok"] = True
                     shared_state["pull_plug"] = is_plug_disconnected
                     shared_state["voltages"] = [v1, v2, v3]
                     shared_state["currents"] = [i1, i2, i3]
@@ -1640,6 +1733,7 @@ async def process_assembled_packet(packet, client):
                         shared_state["session_last_time"] = 0.0
                         shared_state["session_last_power"] = 0.0
                     shared_state["charger_connected"] = True
+                    shared_state["charger_telemetry_ok"] = True
                     shared_state["pull_plug"] = is_plug_disconnected
                     shared_state["voltages"] = [0, 0, 0]
                     shared_state["currents"] = [0.0, 0.0, 0.0]

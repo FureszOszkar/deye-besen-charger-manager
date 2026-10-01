@@ -91,6 +91,16 @@ systemctl daemon-reload
 systemctl enable --now deye-besen-controller
 ```
 
+**Meglévő telepítés frissítése (napló azonnali kiírása):** a szolgáltatásfájl új sora (`Environment=PYTHONUNBUFFERED=1`) nélkül a program kimenete pufferelve kerül a naplóba, és leállításkor az utolsó sorok elveszhetnek. A már telepített szolgáltatásba így kerül be (a `/etc/systemd/system/` alatti fájlt módosítja, majd újraindít):
+
+```bash
+grep -q PYTHONUNBUFFERED /etc/systemd/system/deye-besen-controller.service || sed -i '/^\[Service\]/a Environment=PYTHONUNBUFFERED=1' /etc/systemd/system/deye-besen-controller.service
+systemctl daemon-reload
+systemctl restart deye-besen-controller
+```
+
+**A `config.json` mentése:** a program a mentéshez ideiglenes fájlt (`config.json.tmp`) és biztonsági példányt (`config.json.bak`) hoz létre a mappában, ezért a szolgáltatás felhasználójának a **mappát** is írnia kell tudnia. Ha nem tudja, a program közvetlen írásra vált, és ezt egyszer a naplóba írja (`[KONFIG] A biztonságos mentés nem sikerült …`).
+
 Naplók megtekintése: `journalctl -u deye-besen-controller -f`.
 
 **Megjegyzés:** ha a mappát a telepítés után egy másik könyvtárba mozgatod, a `.service` fájlban az útvonalak a régi helyre fognak mutatni — ilyenkor futtasd újra az `install_linux.sh`-t az új helyről, hogy a `.service` fájl frissüljön.
