@@ -36,7 +36,38 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         private var sessionKey: ByteArray? = null
         private var lastSuccessTime: Long = 0L
 
+        // A widgetre koppintás ezzel kér azonnali frissítést a futó huroktól (a várakozás megszakad)
+        val refreshNow = AtomicBoolean(false)
+
+        private val VALUE_IDS = intArrayOf(
+            R.id.tv_pv, R.id.tv_grid, R.id.tv_soc, R.id.tv_batt_power, R.id.tv_ups, R.id.tv_charger
+        )
+        private const val PREF_WIDGET_TEXTS = "widget_texts"
+        private const val PREF_WIDGET_ONLINE = "widget_online"
+
+        fun hasWidgets(context: Context): Boolean =
+            AppWidgetManager.getInstance(context.applicationContext)
+                .getAppWidgetIds(ComponentName(context.applicationContext, DeyeWidgetProvider::class.java))
+                .isNotEmpty()
+
+        /**
+         * A widgeten utoljára megjelenített értékek beírása egy új RemoteViews-ba. A provider teljes
+         * frissítése (pl. koppintáskor) az alap-elrendezést küldi ki: e nélkül a számok a következő
+         * lekérdezésig eltűnnének.
+         */
+        fun applyCached(context: Context, views: RemoteViews) {
+            val prefs = context.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean(PREF_WIDGET_ONLINE, false)) return
+            val texts = (prefs.getString(PREF_WIDGET_TEXTS, null) ?: return).split("\n")
+            if (texts.size != VALUE_IDS.size) return
+            views.setViewVisibility(R.id.online_dark_overlay, android.view.View.VISIBLE)
+            views.setViewVisibility(R.id.tv_title, android.view.View.VISIBLE)
+            VALUE_IDS.forEachIndexed { i, id -> views.setTextViewText(id, texts[i]) }
+        }
+
         fun enqueueLoop(context: Context, policy: ExistingWorkPolicy) {
+            // Widget nélkül nincs mit frissíteni: az utolsó widget levétele után a hurok ne induljon újra
+            if (!hasWidgets(context)) return
             val workRequest = OneTimeWorkRequest.Builder(WidgetUpdateWorker::class.java).build()
             WorkManager.getInstance(context.applicationContext)
                 .enqueueUniqueWork(LOOP_WORK_NAME, policy, workRequest)
@@ -120,7 +151,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             // Belső frissítési hurok. Kilépési okok: WorkManager stop (10 perces futásidő-limit
             // vagy cancel), illetve a képernyő kikapcsolása (lezárt telefonon nem pazarlunk
             // akkumulátort és hálózatot).
-            while (!isStopped && isScreenOn()) {
+            while (!isStopped && isScreenOn() && hasWidgets(applicationContext)) {
                 val mode = currentNetMode(cm)
                 fetchAndUpdate(mode, client)
 
@@ -131,6 +162,7 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
                 val sleepEnd = System.currentTimeMillis() + pauseMs
                 while (System.currentTimeMillis() < sleepEnd && !isStopped) {
                     if (wifiReconnected.getAndSet(false)) break
+                    if (refreshNow.getAndSet(false)) break      // koppintás a widgetre: azonnali frissítés
                     Thread.sleep(100)
                 }
             }
@@ -153,7 +185,8 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
             // ütemezünk. REPLACE-t használunk, mert a saját, épp lezáruló rekordunk még
             // "futó" állapotú lehet, amin a KEEP fennakadna. A REPLACE-lánc nem tud
             // elszabadulni: egy még el sem indult (csak sorban álló) worker megszakításakor
-            // nem fut le a finally, így nem ütemez újabbat.
+            // nem fut le a finally, így nem ütemez újabbat. Ha közben az utolsó widget is lekerült
+            // a kezdőképernyőről, az enqueueLoop nem ütemez (nincs mit frissíteni).
             if (isScreenOn()) {
                 enqueueLoop(applicationContext, ExistingWorkPolicy.REPLACE)
             }
@@ -306,18 +339,28 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
         val componentName = ComponentName(applicationContext, DeyeWidgetProvider::class.java)
         val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
 
+        val chargerVal = if (data.optInt("charger_power", 0) < 100) 0 else data.optInt("charger_power", 0)
+        // A VALUE_IDS sorrendjében
+        val texts = listOf(
+            "Napelem: ${data.optInt("pv_power", 0)} W",
+            "Hálózat: ${data.optInt("grid_power", 0)} W",
+            "Akku SoC: ${data.optInt("battery_soc", 0)} %",
+            "Akku Telj.: ${data.optInt("battery_power", 0)} W",
+            "Ház: ${data.optInt("ups_load_power", 0)} W",
+            "Autó töltés: $chargerVal W"
+        )
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(applicationContext.packageName, R.layout.widget_layout)
-            val chargerVal = if (data.optInt("charger_power", 0) < 100) 0 else data.optInt("charger_power", 0)
             views.setViewVisibility(R.id.online_dark_overlay, android.view.View.VISIBLE)
             views.setViewVisibility(R.id.tv_title, android.view.View.VISIBLE)
-            views.setTextViewText(R.id.tv_pv, "Napelem: ${data.optInt("pv_power", 0)} W")
-            views.setTextViewText(R.id.tv_grid, "Hálózat: ${data.optInt("grid_power", 0)} W")
-            views.setTextViewText(R.id.tv_soc, "Akku SoC: ${data.optInt("battery_soc", 0)} %")
-            views.setTextViewText(R.id.tv_batt_power, "Akku Telj.: ${data.optInt("battery_power", 0)} W")
-            views.setTextViewText(R.id.tv_ups, "Ház: ${data.optInt("ups_load_power", 0)} W")
-            views.setTextViewText(R.id.tv_charger, "Autó töltés: $chargerVal W")
+            VALUE_IDS.forEachIndexed { i, id -> views.setTextViewText(id, texts[i]) }
             appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
+        }
+        // A megjelenített értékek megjegyzése: a provider teljes frissítése (koppintás) ezekből tölti vissza
+        val prefs = applicationContext.getSharedPreferences("DeyePrefs", Context.MODE_PRIVATE)
+        val joined = texts.joinToString("\n")
+        if (!prefs.getBoolean(PREF_WIDGET_ONLINE, false) || prefs.getString(PREF_WIDGET_TEXTS, null) != joined) {
+            prefs.edit().putString(PREF_WIDGET_TEXTS, joined).putBoolean(PREF_WIDGET_ONLINE, true).apply()
         }
     }
 
@@ -329,6 +372,9 @@ class WidgetUpdateWorker(appContext: Context, workerParams: WorkerParameters) :
 
         if (System.currentTimeMillis() - effectiveLastSuccess < 15000) {
             return // Grace period – megtartjuk a régi adatot
+        }
+        if (prefs.getBoolean(PREF_WIDGET_ONLINE, false)) {
+            prefs.edit().putBoolean(PREF_WIDGET_ONLINE, false).apply()   // a widget mostantól üres: koppintásra se töltsük vissza a régit
         }
 
         val appWidgetManager = AppWidgetManager.getInstance(applicationContext)

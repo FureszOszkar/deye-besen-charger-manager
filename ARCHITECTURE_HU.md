@@ -338,6 +338,14 @@ Két, egymástól független hibakör javítása: a webszerver szálfelhalmozód
 *   **Energia-számláló:** egy 30 mp-nél hosszabb telemetria-szünet után a munkamenet végéig nem számolt tovább. Javítva.
 *   **Hiányzó töltőáram:** kézi indításnál a vezérlő kivétellel leállt, és a Watchdog 10 másodpercenként újraindította. Most hibaüzenet, illetve egyszeri naplózás.
 *   **Ellenőrzés:** új `config_save_test` (26 eset: megszakadt mentés, párhuzamos mentések, régebbi pillanatkép, sérült/hiányzó fájl, `.bak`, nem írható mappa, hibás űrlapok) és `charge_controller_l2_test` (38 eset a valódi vezérlővel, virtuális órával: szakadás az ablak közepén majd az ablak vége, zárolás, 5 perces várakozás, lehűlés alatti túlterhelés, hiányzó beállítások, STOP ismétlése, energia-számláló); ugyanez a teszt a javítás előtti kódon 12 helyen megbukik. A korábbi tesztek változatlanul sikeresek. `--sim` próba: hibás űrlap után az üzemmód megmarad; Solar Auto indítás → túlterhelés → STOP → megerősítés → nincs azonnali újraindítás, nincs zárolás.
+*   **App-javítások (`MainActivity.kt`, `AppDetailActivities.kt`, `AppUi.kt`, `DeyeWidgetProvider.kt`, `WidgetUpdateWorker.kt`):**
+    *   a megszakított lekérdezés (a képernyő elhagyása) nem hiba: a `CancellationException` továbbmegy, nincs „Nincs kapcsolat: … was cancelled” sáv;
+    *   kapcsolati hibánál csak a csempék tárolója (`body`) halványul, a fejléc és a hibasáv nem;
+    *   a lüktetés-animátorok `onPause`-ban megállnak, `onDestroy`-ban megszűnnek;
+    *   `AppUi.action()`: amíg ugyanaz a művelet (végpont + tartalom) fut, az újabb koppintás nem indít másikat; a kézi töltésindításnak saját jelzője van;
+    *   részletképernyők: a `saveButton()` az első sikeres betöltésig halvány és nem ment;
+    *   widget: a provider teljes frissítése visszaírja az utoljára megjelenített értékeket (`applyCached()`, a `DeyePrefs`-ben tárolva), a koppintás azonnali frissítést kér a futó huroktól (`refreshNow`); widget nélkül az `enqueueLoop()` nem ütemez, így az utolsó widget levétele után a hurok nem indul újra.
+    *   **Ellenőrzés:** helyi fordítás; emulátorban, lassító közvetítővel a szimulációs szerver előtt: megszakítás után nincs „cancelled” sáv (a régi appban 4-ből 4-szer megjelent), betöltés előtt a Mentés nem küld kérést (a régi app küldött), dupla koppintás egy kérést küld (a régi kettőt), a hibasáv teljes fényerejű. **Nem ellenőrzött:** a két widget-javítás és az animátorok (az emulátoron nem volt widget kitéve) — a telefonon kell kipróbálni.
 *   **Megfigyelés:** a szakadás utáni hiba a régi kódban időzítésfüggő volt — ha a vezérlő az újracsatlakozás és az első telemetria közé eső pillanatban futott, az ütemezett módban újra START-ot küldött (ami véletlenül „visszaadta” a töltést), egyébként a töltés külsőnek számított.
 
 ### 2026-10-01

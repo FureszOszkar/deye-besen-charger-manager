@@ -344,6 +344,14 @@ The home overload protection logic calculates the total load as (UPS Load + Char
 * **Energy counter:** after a telemetry gap longer than 30 s it stopped counting until the end of the session. Fixed.
 * **Missing charging current:** on a manual start the controller died with an exception and the Watchdog restarted it every 10 seconds. Now an error message (`/api/force_submode`) and a one-time log line; a mode with missing (`None`) settings is skipped.
 * **Verification:** new `config_save_test` (26 cases: interrupted save, concurrent saves, older snapshot, corrupt/missing file, `.bak`, unwritable folder, rejected forms) and `charge_controller_l2_test` (38 cases with the real controller and a virtual clock: dropout mid-window then window end, lockdown, the 5-minute wait, overload during cooldown, missing settings, STOP repeats, energy counter); the same test fails in 12 places on the pre-fix code. The earlier tests still pass. `--sim` check: the mode survives a rejected form; Solar Auto start → overload → STOP → confirmation → no immediate restart, no lockdown.
+* **App fixes (`MainActivity.kt`, `AppDetailActivities.kt`, `AppUi.kt`, `DeyeWidgetProvider.kt`, `WidgetUpdateWorker.kt`):**
+    * a cancelled request (leaving the screen) is not an error: `CancellationException` is rethrown, no "Nincs kapcsolat: … was cancelled" bar;
+    * on a connection error only the tile container (`body`) is dimmed, not the header and the error bar;
+    * the pulse animators pause in `onPause` and are cancelled in `onDestroy`;
+    * `AppUi.action()`: while the same action (endpoint + body) is running, another tap does not start a second one; the manual charge start has its own flag;
+    * detail screens: `saveButton()` is dimmed and does not save until the first successful load;
+    * widget: the provider's full update writes back the last displayed values (`applyCached()`, stored in `DeyePrefs`), a tap asks the running loop for an immediate refresh (`refreshNow`); without a widget `enqueueLoop()` does not schedule, so the loop is not restarted after the last widget is removed.
+    * **Verification:** local build; in the emulator with a delaying proxy in front of the simulation server: no "cancelled" bar after a cancellation (the old app showed it 4 times out of 4), Save sends no request before the load (the old app did), a double tap sends one request (the old app two), the error bar is at full brightness. **Not verified:** the two widget fixes and the animators (no widget was placed on the emulator) — to be tried on the phone.
 * **Observation:** the post-dropout bug was timing-dependent in the old code — if the controller ran between the reconnect and the first telemetry, it re-sent START in scheduled mode (which accidentally "gave back" the session); otherwise the session counted as external.
 
 ### 2026-10-01

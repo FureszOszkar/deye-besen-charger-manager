@@ -288,7 +288,7 @@ A widget a szerverrel megegyező, titkosított kapcsolaton keresztül másodperc
 
 *   A widget **Wi-Fin, vagy Wi-Fi nélkül aktív VPN-en (pl. Tailscale) keresztül frissül**, ha a szerver elérhető. Wi-Fin kb. 5 másodpercenként, Wi-Fi nélkül VPN-en át (mobilneten) a mobiladat kímélése miatt 30 másodpercenként. Mobiladaton VPN nélkül üresen (átlátszón) marad. Otthonon kívüli eléréshez a widget beállításában a szerver címe helyett a NAS VPN-es (pl. Tailscale 100.x.y.z) címét kell megadni; hazatérve (Wi-Fin) azonnal visszaáll az 5 másodperces ütem.
 *   A frissítés a képernyő bekapcsolt állapotában, kb. 5 másodpercenként történik (lezárt telefonon energiatakarékosságból szünetel).
-*   A widgetre **koppintva** azonnali kézi frissítés kényszeríthető.
+*   A widgetre **koppintva** azonnali kézi frissítés kényszeríthető; a koppintás közben a számok a képernyőn maradnak.
 *   A widget ellenálló a **WiFi-hálózatok közötti váltásra**: ha elhagyod a saját hálózatod hatósugarát, majd visszatérsz, az adatok néhány másodpercen belül maguktól helyreállnak.
 
 ### Biztonsági jegyzet
@@ -387,7 +387,8 @@ Az app a szerver címét és a jelszót kéri — ugyanaz a tárolt beállítás
 *   **Energia-csempék** kis ikonokkal: napelem, hálózat, akku, ház — ugyanazzal a színkóddal, mint a webes Mérések kártyán (hálózat zöld = visszatáplálás, piros = vételezés; akku zöld = töltődik, piros = merül).
 *   **Autótöltő:** a mód, töltés közben az aktuális teljesítmény **pirossal**; **Indítás** (= a webes „Kézi indítás”) és **Leállítás** (= a webes „Ideiglenes leállítás”, soft stop). Ha a Solar Auto vagy az Ütemezett automatizmus be van kapcsolva, **az egész csempe lüktet**.
 *   **Klímák:** hőmérséklet és páratartalom (a légtisztítóé), „Utoljára: …” (az utoljára küldött parancs és ideje — az infra egyirányú, a klíma valódi állapotát a program nem tudja), **Fűtés BE / Hűtés BE / KI** gombok. Ha a klíma-automata be van kapcsolva, a csempék lüktetnek.
-*   **Redőny, napellenző, LED-szalag, konnektor, internet-rádió:** a csempére bárhol koppintva (vagy a nyíllal ›) a részletek nyílnak; **kapcsolni csak a csempe gombjaival lehet**, így a részletek megnyitása nem kapcsol véletlenül.
+*   **Redőny, napellenző, LED-szalag, konnektor, internet-rádió:** a csempére bárhol koppintva (vagy a nyíllal ›) a részletek nyílnak; **kapcsolni csak a csempe gombjaival lehet**, így a részletek megnyitása nem kapcsol véletlenül. Egy gomb a saját művelete alatt nem indít újabbat (lassú kapcsolaton a dupla koppintás egy parancsot küld).
+*   **Időzítők mentése:** a részletképernyőkön a **Mentés** gomb halvány, amíg az időzítő be nem töltődött a szerverről, és addig nem ment — így egy üres űrlap nem törölheti a szerveren lévő időzítőt.
 *   **Redőny, napellenző:** Fel/Le (Be/Ki) gombok; a részleteken a heti időzítő (ugyanaz, mint a webes Árnyékolás oldalon).
 *   **LED-szalag, konnektor:** **Be** és **Ki** gomb; a részleteken LED: fényerő, szín; konnektor: napi időzítő két be-ki párral.
 *   **Internet-rádió:** „Utoljára: power …” (az utoljára küldött gombnyomás ideje) és az időzítő állapota; a **„Be/Ki (power)”** gomb egy power gombnyomást küld; a részleteken a napi időzítő.

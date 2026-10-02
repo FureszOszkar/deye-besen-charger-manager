@@ -16,7 +16,9 @@ class DeyeWidgetProvider : AppWidgetProvider() {
         }
         // Frissítő hurok indítása (KEEP: ha már fut, nem szakítjuk meg) és a 15 perces
         // életben tartó heartbeat ütemezése. Az onUpdate koppintás-frissítéskor is lefut,
-        // így egy beragadt widget a rákoppintással azonnal újraéleszthető.
+        // így egy beragadt widget a rákoppintással azonnal újraéleszthető. A futó huroktól
+        // azonnali frissítést kérünk (nem várja ki a ciklus végét).
+        WidgetUpdateWorker.refreshNow.set(true)
         WidgetUpdateWorker.enqueueLoop(context, ExistingWorkPolicy.KEEP)
         WidgetUpdateWorker.ensureKeepAlive(context)
     }
@@ -36,9 +38,13 @@ class DeyeWidgetProvider : AppWidgetProvider() {
             val alpha = prefs.getInt("bg_alpha", 255)
             views.setInt(R.id.img_background, "setImageAlpha", alpha)
 
+            // Ez teljes frissítés (az alap-elrendezést küldi ki), ezért az utoljára megjelenített
+            // értékeket visszaírjuk: e nélkül koppintáskor a számok a következő lekérdezésig eltűnnének.
+            WidgetUpdateWorker.applyCached(context, views)
+
             // Koppintás a widgetre = kézi frissítés-kényszerítés. A broadcast az onUpdate-et
-            // hívja meg, ami KEEP-pel újraindítja a frissítő hurkot, ha az meghalt volna.
-            // (Élő hurok mellett a koppintásnak nincs mellékhatása.)
+            // hívja meg, ami KEEP-pel újraindítja a frissítő hurkot, ha az meghalt volna, a futó
+            // huroktól pedig azonnali frissítést kér.
             val refreshIntent = Intent(context, DeyeWidgetProvider::class.java).apply {
                 action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, intArrayOf(appWidgetId))

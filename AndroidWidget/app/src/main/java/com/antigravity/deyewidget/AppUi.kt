@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,6 +28,7 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /** Közös felületi segédek az app képernyőihez (programból épített nézetek, világos/sötét színek). */
 object AppUi {
@@ -136,18 +138,30 @@ object AppUi {
         return if (line.length > 80) line.take(79) + "…" else line
     }
 
-    /** Egy művelet háttérszálon; a szerver „error” válaszát és a hibát üzenetben mutatja. */
+    /** Az éppen futó műveletek (végpont + tartalom): ugyanaz a gomb a saját művelete alatt nem indít másikat. */
+    private val runningActions: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Egy művelet háttérszálon; a szerver „error” válaszát és a hibát üzenetben mutatja.
+     * Amíg ugyanez a művelet (ugyanaz a végpont ugyanazzal a tartalommal) fut, az újabb koppintás nem
+     * indít másikat — egy lassú kapcsolatnál a dupla koppintás különben két parancsot küldene (a rádió
+     * power gombjánál ez épp visszakapcsolna). A megszakítás (a képernyő elhagyása) nem hiba.
+     */
     fun action(activity: Activity, scope: CoroutineScope, path: String, body: JSONObject, after: () -> Unit) {
+        val key = path + "\n" + body
+        if (!runningActions.add(key)) return
         scope.launch {
             val msg = try {
                 val res = withContext(Dispatchers.IO) { AppApi.post(activity, path, body) }
                 if (res.optString("status") == "success") null else res.optString("message", "Sikertelen művelet.")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.message ?: "Hiba"
             }
             if (msg != null) toast(activity, msg)
             after()
-        }
+        }.invokeOnCompletion { runningActions.remove(key) }   // akkor is lefut, ha a művelet megszakadt vagy el sem indult
     }
 
     /** Kártya (lekerekített háttér, belső margó). */

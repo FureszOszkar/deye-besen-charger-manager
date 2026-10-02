@@ -20,6 +20,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.google.android.material.slider.Slider
 import com.google.android.material.switchmaterial.SwitchMaterial
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,10 +78,38 @@ abstract class AppDetailActivity : Activity() {
                 val s = withContext(Dispatchers.IO) { AppApi.status(this@AppDetailActivity) }
                 render(s, firstLoad)
                 firstLoad = false
+                if (!loaded) {
+                    loaded = true
+                    saveButtons.forEach { it.alpha = 1f }
+                }
+            } catch (e: CancellationException) {
+                throw e     // a képernyő bezárása miatti megszakítás nem kapcsolati hiba
             } catch (e: Exception) {
                 AppUi.toast(this@AppDetailActivity, "Nincs kapcsolat: ${e.message ?: "hiba"}")
             }
         }
+    }
+
+    /** A szerverről már betöltődött-e az állapot (az űrlap ki van-e töltve a mentett értékekkel). */
+    private var loaded = false
+    private val saveButtons = ArrayList<TextView>()
+
+    /**
+     * „Mentés” gomb az időzítő-űrlapokhoz. Az első sikeres betöltésig halvány, és nem ment: a be nem
+     * töltött (üres) űrlap mentése törölné a szerveren lévő időzítőt.
+     */
+    protected fun saveButton(onSave: () -> Unit): TextView {
+        val button = AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
+            if (loaded) {
+                onSave()
+            } else {
+                AppUi.toast(this, "Még nincs betöltve a szerverről, ezért nem mentek.")
+                reload()
+            }
+        }
+        button.alpha = if (loaded) 1f else 0.5f
+        saveButtons.add(button)
+        return button
     }
 
     protected fun send(path: String, body: JSONObject) = AppUi.action(this, scope, path, body) { reload() }
@@ -201,7 +230,7 @@ class PlugActivity : AppDetailActivity() {
         // Naponta két be-ki pár (pl. lámpa reggel és este)
         editor = ScheduleEditor(this, listOf("on", "off", "on2", "off2"), listOf("1. Be", "1. Ki", "2. Be", "2. Ki"))
         c2.addView(editor.view)
-        c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
+        c2.addView(saveButton {
             send("/api/plug/schedule", JSONObject().put("enabled", timer.isChecked).put("schedule", editor.toJson()))
         })
         content.addView(c2)
@@ -245,7 +274,7 @@ class RadioActivity : AppDetailActivity() {
         c2.addView(AppUi.text(this, "A power gomb vált (Be és Ki ugyanaz a gombnyomás).", 12f, R.color.o_muted))
         editor = ScheduleEditor(this, listOf("on", "off"), listOf("Be", "Ki"))
         c2.addView(editor.view)
-        c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
+        c2.addView(saveButton {
             send("/api/radio/schedule", JSONObject().put("enabled", timer.isChecked).put("schedule", editor.toJson()))
         })
         content.addView(c2)
@@ -294,7 +323,7 @@ class ShadingActivity : AppDetailActivity() {
         c2.addView(trow)
         editor = ScheduleEditor(this, listOf("up", "down"), listOf(up, down))
         c2.addView(editor.view)
-        c2.addView(AppUi.button(this, "Mentés", R.color.o_accent, R.color.o_on_accent) {
+        c2.addView(saveButton {
             send("/api/shading/config", JSONObject().put("device", device).put("enabled", timer.isChecked)
                 .put("schedule", editor.toJson()))
         })

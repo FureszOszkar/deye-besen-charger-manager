@@ -288,7 +288,7 @@ Over the same encrypted connection the server uses, the widget displays values t
 
 *   The widget **refreshes on Wi-Fi, or without Wi-Fi through an active VPN (e.g. Tailscale)**, while the server is reachable. On Wi-Fi roughly every 5 seconds; without Wi-Fi through a VPN (mobile data) every 30 seconds to save mobile data. On mobile data without a VPN it stays blank (transparent). For access away from home, enter the NAS's VPN address (e.g. Tailscale 100.x.y.z) as the server address in the widget settings; back on Wi-Fi the 5-second rhythm resumes immediately.
 *   Refreshes happen while the screen is on, roughly every 5 seconds (paused on a locked phone to save battery).
-*   **Tapping** the widget forces an immediate manual refresh.
+*   **Tapping** the widget forces an immediate manual refresh; the numbers stay on screen while it happens.
 *   The widget is resilient to **switching between Wi-Fi networks**: if you leave your own network's range and later return, the data recovers on its own within a few seconds.
 
 ### Security note
@@ -387,7 +387,8 @@ The app asks for the server address and the password — the same stored setting
 *   **Energy tiles** with small icons: solar, grid, battery, house — with the same colour code as the web Measurements card (grid green = export, red = import; battery green = charging, red = discharging).
 *   **Car charger:** the mode, and while charging the current power **in red**; **Indítás** (start = the web "Kézi indítás") and **Leállítás** (stop = the web "Ideiglenes leállítás", soft stop). If the Solar Auto or Scheduled automation is enabled, **the whole tile pulses**.
 *   **Air conditioners:** temperature and humidity (from the air purifier), "Utoljára: …" (the last command sent and its time — IR is one-way, the program does not know the real state of the air conditioner), **Fűtés BE / Hűtés BE / KI** (heating ON / cooling ON / OFF) buttons. If the climate automation is enabled, the tiles pulse.
-*   **Roller shutter, awning, LED strip, plug, internet radio:** tapping anywhere on the tile (or the arrow ›) opens the details; **switching is only possible with the tile's buttons**, so opening the details never switches by accident.
+*   **Roller shutter, awning, LED strip, plug, internet radio:** tapping anywhere on the tile (or the arrow ›) opens the details; **switching is only possible with the tile's buttons**, so opening the details never switches by accident. A button does not start a second action while its own is running (on a slow connection a double tap sends one command).
+*   **Saving timers:** on the detail screens the **Mentés** (save) button is dimmed until the timer has been loaded from the server and does not save before that — so an empty form cannot erase the timer stored on the server.
 *   **Roller shutter, awning:** up/down buttons; the details hold the weekly timer (the same as on the web Árnyékolás page).
 *   **LED strip, plug:** **Be** (on) and **Ki** (off) buttons; the details hold LED: brightness, colour; plug: daily timer with two on/off pairs.
 *   **Internet radio:** "Utoljára: power …" (the time of the last button press sent) and the timer state; the **"Be/Ki (power)"** button sends one power button press; the details hold the daily timer.

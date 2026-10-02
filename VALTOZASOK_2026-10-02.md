@@ -1,6 +1,6 @@
 # A `javitasok-2026-10-02` ág — mi változott és mi az állapota
 
-**Ez az ág NEM a futó változat.** A `main` ágon a stabilan futó program van; ez az ág a 2026-10-02-i átnézés utáni javítások 1–2. lépését őrzi, hogy ne vesszen el.
+**Ez az ág NEM a futó változat.** A `main` ágon a stabilan futó program van; ez az ág a 2026-10-02-i átnézés utáni javítások 1–3. lépését őrzi (szerver: 1–2. lépés, app: 3. lépés), hogy ne vesszen el.
 
 ## Állapot (fontos)
 
@@ -44,6 +44,17 @@
 * `ARCHITECTURE_HU.md`, `ARCHITECTURE_EN.md`: 2.2, 6.1/6.2/6.4 és a 2026-10-02-i bejegyzés.
 * `LinuxController/README.md`: a szolgáltatásfájl frissítése meglévő telepítésen, a mappa írhatósága.
 
+### App (`AndroidWidget`) — a terv 3. lépése
+Csak az appot és a widgetet érinti; a szerver API-ja nem változott, ezért az app a `main` ág szerverével is működik.
+* **Megszakított lekérdezés (`MainActivity.kt`, `AppDetailActivities.kt`, `AppUi.kt`):** ha egy képernyőt elhagysz, miközben fut egy lekérdezés, az már nem jelenik meg „Nincs kapcsolat: … was cancelled” hibaként.
+* **Hibasáv (`MainActivity.kt`):** kapcsolati hibánál csak a csempék halványulnak, a fejléc és a hibasáv teljes fényerővel látszik.
+* **Lüktetés (`MainActivity.kt`):** az animációk megállnak, ha a főképernyő háttérbe kerül, és megszűnnek bezáráskor.
+* **Dupla koppintás (`AppUi.kt`, `MainActivity.kt`):** egy gomb a saját művelete alatt nem indít másikat.
+* **Mentés a részletképernyőkön (`AppDetailActivities.kt`):** a Mentés gomb az első sikeres betöltésig halvány, és nem ment (üzenetet ír, és újra próbálja a betöltést).
+* **Widget, koppintás (`DeyeWidgetProvider.kt`, `WidgetUpdateWorker.kt`):** a koppintás nem üríti ki a számokat, és azonnali frissítést kér.
+* **Widget, utolsó widget levétele (`WidgetUpdateWorker.kt`):** widget nélkül a frissítő hurok nem indul újra.
+* Az ebből fordított APK a gépen `app-debug-javitasok.apk` néven van a projektmappában (a repóba APK nem kerül).
+
 ### `deye_besen_controller.exe`
 * A módosított forrásból 2026-10-02 00:54-kor készült fordítás. A jogosultság- és tulajdonos-öröklés később került a `config.py`-ba; Windowson ennek nincs hatása.
 
@@ -62,11 +73,17 @@
 * `config_save_test`: 28/28.
 * `charge_controller_l2_test` (a valódi vezérlő, virtuális órával): 38/38. Ugyanez a teszt a `main` ág kódján 12 helyen megbukik.
 * Összehasonlítás a `main` ág vezérlőjével hat hétköznapi helyzeten (ütemezett ablak, Solar Auto, kézi indítás és leállítás, külső töltés, áramváltás két ablak között, Solar Auto ütemezett ablakban): a két kód másodpercre ugyanazokat a parancsokat küldi. A hetedik helyzetben (túlterhelés, majd megszűnik) szándékosan eltér: a `main` 5 mp múlva újraindít, ez az ág 5 percet vár.
+* **App (emulátor, lassító közvetítővel a szimulációs szerver előtt), ugyanaz a próba a `main` ág appján és ezen az ágon:**
+  * megszakítás után „… was cancelled” hibasáv: `main` 4-ből 4-szer, ezen az ágon egyszer sem;
+  * Mentés betöltés előtt: a `main` appja elküldi az üres időzítőt, ez az ág nem küld semmit, betöltés után ment;
+  * dupla koppintás a rádió gombjára lassú kapcsolaton: `main` 2 kérés, ez az ág 1;
+  * a hibasáv teljes fényerővel látszik (képernyőképen ellenőrizve).
+* **Az appból nem ellenőrzött:** a két widget-javítás (az emulátoron nem volt widget kitéve) és a lüktetés-animációk leállása. Ezeket a telefonon kell kipróbálni.
+* Az emulátor hálózata a próbák alatt néha magától megakadt (valódi „timeout” hibasáv); a gépről mérve a szerver és a közvetítő válasza 0,02 mp volt.
 * A tesztfájlok nincsenek a repóban.
 
 ## Ami a tervből nem készült el
 
-* 3. lépés: app-javítások.
 * 4. lépés: webes biztonság.
 * 5. lépés: takarítás.
 
@@ -74,7 +91,7 @@
 
 # Branch `javitasok-2026-10-02` — what changed and its status (English summary)
 
-**This branch is NOT the running version.** `main` holds the stable program; this branch keeps steps 1–2 of the fixes made after the 2026-10-02 review.
+**This branch is NOT the running version.** `main` holds the stable program; this branch keeps steps 1–3 of the fixes (server: steps 1–2, app: step 3) made after the 2026-10-02 review.
 
 **Status:** the modified files ran on the NAS for a short time from about 01:28 on 2026-10-02. The user saw the program **dropping the inverter connection**, so the running version was restored to the `main` files. **The cause has not been investigated.** The inverter polling code is unchanged on this branch, but that does not prove the problem is unrelated. **Do not deploy until the cause is clear.** Not tested with the real charger.
 
@@ -83,7 +100,8 @@
 * `dashboard.py`: `/api/config` validation errors no longer call `load_config()`; `/api/force_submode` rejects a manual start without a charging current.
 * `charging_logic.py`: decisions only with a live connection and fresh telemetry; lockdown, rate limits and cooldown block only starting; 5-minute wait after a rule-based stop; STOP confirmation with a repeat every 60 s; energy counter continues after a gap; missing settings are skipped instead of crashing.
 * `main.py`: flush before the forced exit. Service file: `PYTHONUNBUFFERED=1`. Docs updated (HU/EN).
+* App (`AndroidWidget`, step 3 of the plan; server API unchanged): a cancelled request is no longer shown as an error; only the tiles are dimmed on a connection error; pulse animations stop in the background; a button does not start a second action while its own is running; Save on the detail screens does not save before the first successful load; tapping the widget keeps the numbers and asks for an immediate refresh; the refresh loop is not restarted without a widget.
 
 **Found during the live attempt:** the inverter drops (uninvestigated); a pre-existing manual `config.json.bak` on the NAS that the new code would overwrite and could load as a stale backup; owner/mode preservation not tried on Linux.
 
-**Verification:** `config_save_test` 28/28, `charge_controller_l2_test` 38/38 (fails in 12 places on `main`); six everyday scenarios give identical commands on both codes, the seventh differs on purpose. The test files are not in the repository.
+**Verification:** `config_save_test` 28/28, `charge_controller_l2_test` 38/38 (fails in 12 places on `main`); six everyday scenarios give identical commands on both codes, the seventh differs on purpose. App checks in the emulator (delaying proxy in front of the simulation server): the "was cancelled" error bar appears 4 of 4 times on `main` and never on this branch; Save before the load sends the empty timer on `main` and nothing on this branch; a double tap on a slow connection sends 2 requests on `main` and 1 here. The two widget fixes and the animation stop were not verified (no widget on the emulator). The test files are not in the repository.

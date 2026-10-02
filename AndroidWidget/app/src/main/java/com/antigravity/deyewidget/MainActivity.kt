@@ -12,6 +12,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,6 +40,9 @@ class MainActivity : Activity() {
 
     private lateinit var banner: TextView
     private lateinit var content: LinearLayout
+    /** A csempék tárolója: kapcsolati hibánál csak ez halványul el, a fejléc és a hibasáv nem. */
+    private lateinit var body: LinearLayout
+    private var chargerStartBusy = false
     private val energy = HashMap<String, TextView>()
 
     private class Tile(val root: LinearLayout, val bg: GradientDrawable, val title: TextView, val status: TextView, val extra: TextView?) {
@@ -63,6 +67,8 @@ class MainActivity : Activity() {
         scroll.addView(content)
         setContentView(scroll)
         buildHeader()
+        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(body)
         buildEnergy()
         buildDevices()
         // Első indításkor (még nincs szervercím) a beállító képernyő nyílik meg
@@ -72,6 +78,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        pulsingTiles().forEach { it.animator?.resume() }
         pollJob = scope.launch {
             while (isActive) {
                 refresh()
@@ -83,12 +90,18 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         pollJob?.cancel()
+        // A lüktetés háttérben (pl. nyitott részletképernyő alatt) ne fusson
+        pulsingTiles().forEach { it.animator?.pause() }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+        pulsingTiles().forEach { it.animator?.cancel(); it.animator = null }
     }
+
+    /** A lüktetni tudó csempék (autótöltő és klímák). */
+    private fun pulsingTiles(): List<Tile> = listOf(charger) + climates
 
     // --- Felépítés ---------------------------------------------------------------------------
 
@@ -134,7 +147,7 @@ class MainActivity : Activity() {
             cells.add(cell)
         }
         card.addView(AppUi.twoColumns(this, cells, fillHeight = true))
-        content.addView(card)
+        body.addView(card)
     }
 
     private fun newTile(name: String, icon: Int, withArrow: Boolean, onArrow: (() -> Unit)? = null): Tile {
@@ -220,7 +233,7 @@ class MainActivity : Activity() {
         radio = newTile("Internet-rádió", R.drawable.ic_app_radio, true) { startActivity(Intent(this, RadioActivity::class.java)) }
         radio.root.addView(AppUi.row(this, AppUi.button(this, "Be/Ki (power)", R.color.o_off_bg, R.color.o_text) { radioPress() }))
         tiles.add(radio.root)
-        content.addView(AppUi.twoColumns(this, tiles, fillHeight = true))
+        body.addView(AppUi.twoColumns(this, tiles, fillHeight = true))
     }
 
     // --- Frissítés ---------------------------------------------------------------------------
@@ -230,13 +243,14 @@ class MainActivity : Activity() {
             val s = withContext(Dispatchers.IO) { AppApi.status(this@MainActivity) }
             last = s
             banner.visibility = View.GONE
-            content.alpha = 1f
+            body.alpha = 1f
             render(s)
+        } catch (e: CancellationException) {
+            throw e     // a megszakítás (pl. a képernyő elhagyása) nem kapcsolati hiba
         } catch (e: Exception) {
             banner.text = "Nincs kapcsolat: ${AppUi.short(e.message ?: "ismeretlen hiba")}"
             banner.visibility = View.VISIBLE
-            content.alpha = 0.55f
-            banner.alpha = 1f
+            body.alpha = 0.55f      // csak a csempék halványulnak, a hibasáv teljes fényerővel látszik
         }
     }
 
@@ -354,19 +368,27 @@ class MainActivity : Activity() {
 
     /** Kézi indítás: ugyanaz, mint a webes „Kézi indítás (Start)” gomb (force_submode, majd force mód). */
     private fun chargerStart() {
+        if (chargerStartBusy) return    // amíg az indítás fut, a gomb újabb koppintása nem indít másikat
+        chargerStartBusy = true
         scope.launch {
-            val msg = try {
-                withContext(Dispatchers.IO) {
-                    val r1 = AppApi.post(this@MainActivity, "/api/force_submode", JSONObject().put("force_submode", "manual_start"))
-                    if (r1.optString("status") != "success") return@withContext r1.optString("message", "Sikertelen indítás.")
-                    val r2 = AppApi.post(this@MainActivity, "/api/mode", JSONObject().put("control_mode", "force"))
-                    if (r2.optString("status") != "success") r2.optString("message", "Nem sikerült a kézi módot bekapcsolni.") else null
+            try {
+                val msg = try {
+                    withContext(Dispatchers.IO) {
+                        val r1 = AppApi.post(this@MainActivity, "/api/force_submode", JSONObject().put("force_submode", "manual_start"))
+                        if (r1.optString("status") != "success") return@withContext r1.optString("message", "Sikertelen indítás.")
+                        val r2 = AppApi.post(this@MainActivity, "/api/mode", JSONObject().put("control_mode", "force"))
+                        if (r2.optString("status") != "success") r2.optString("message", "Nem sikerült a kézi módot bekapcsolni.") else null
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    e.message ?: "Hiba"
                 }
-            } catch (e: Exception) {
-                e.message ?: "Hiba"
+                if (msg != null) AppUi.toast(this@MainActivity, msg)
+                refresh()
+            } finally {
+                chargerStartBusy = false
             }
-            if (msg != null) AppUi.toast(this@MainActivity, msg)
-            refresh()
         }
     }
 
