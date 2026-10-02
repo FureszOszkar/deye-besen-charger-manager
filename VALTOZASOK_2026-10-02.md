@@ -53,7 +53,7 @@ Csak az appot és a widgetet érinti; a szerver API-ja nem változott, ezért az
 * **Mentés a részletképernyőkön (`AppDetailActivities.kt`):** a Mentés gomb az első sikeres betöltésig halvány, és nem ment (üzenetet ír, és újra próbálja a betöltést).
 * **Widget, koppintás (`DeyeWidgetProvider.kt`, `WidgetUpdateWorker.kt`):** a koppintás nem üríti ki a számokat, és azonnali frissítést kér.
 * **Widget, utolsó widget levétele (`WidgetUpdateWorker.kt`):** widget nélkül a frissítő hurok nem indul újra.
-* Az ebből fordított APK a gépen `app-debug-javitasok.apk` néven van a projektmappában (a repóba APK nem kerül).
+* Az ebből fordított APK az ág gyökerében van: `app-debug-javitasok.apk` (hibakereső fordítás, a gépen készült 2026-10-02-án). A stabil app fölé telepíthető.
 
 ### `deye_besen_controller.exe`
 * A módosított forrásból 2026-10-02 00:54-kor készült fordítás. A jogosultság- és tulajdonos-öröklés később került a `config.py`-ba; Windowson ennek nincs hatása.
@@ -100,7 +100,7 @@ Csak az appot és a widgetet érinti; a szerver API-ja nem változott, ezért az
 * `dashboard.py`: `/api/config` validation errors no longer call `load_config()`; `/api/force_submode` rejects a manual start without a charging current.
 * `charging_logic.py`: decisions only with a live connection and fresh telemetry; lockdown, rate limits and cooldown block only starting; 5-minute wait after a rule-based stop; STOP confirmation with a repeat every 60 s; energy counter continues after a gap; missing settings are skipped instead of crashing.
 * `main.py`: flush before the forced exit. Service file: `PYTHONUNBUFFERED=1`. Docs updated (HU/EN).
-* App (`AndroidWidget`, step 3 of the plan; server API unchanged): a cancelled request is no longer shown as an error; only the tiles are dimmed on a connection error; pulse animations stop in the background; a button does not start a second action while its own is running; Save on the detail screens does not save before the first successful load; tapping the widget keeps the numbers and asks for an immediate refresh; the refresh loop is not restarted without a widget.
+* App (`AndroidWidget`, step 3 of the plan; server API unchanged): a cancelled request is no longer shown as an error; only the tiles are dimmed on a connection error; pulse animations stop in the background; a button does not start a second action while its own is running; Save on the detail screens does not save before the first successful load; tapping the widget keeps the numbers and asks for an immediate refresh; the refresh loop is not restarted without a widget. The APK built from these sources is in the branch root: `app-debug-javitasok.apk`.
 
 **Found during the live attempt:** the inverter drops (uninvestigated); a pre-existing manual `config.json.bak` on the NAS that the new code would overwrite and could load as a stale backup; owner/mode preservation not tried on Linux.
 
